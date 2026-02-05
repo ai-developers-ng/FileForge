@@ -1,0 +1,41 @@
+version: '3.8'
+
+# Full stack with Apache Tika server for enhanced text extraction
+services:
+  ocr-engine:
+    build: .
+    container_name: ocr-engine
+    ports:
+      - "5001:5001"
+    volumes:
+      - ocr-data:/app/data
+    environment:
+      - MAX_FILE_MB=25
+      - TIKA_SERVER_URL=http://tika:9998
+    depends_on:
+      tika:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  tika:
+    image: apache/tika:latest
+    container_name: tika-server
+    ports:
+      - "9998:9998"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  ocr-data:
+    driver: local

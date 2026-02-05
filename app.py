@@ -1,0 +1,327 @@
+import json
+import os
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, url_for
+from werkzeug.utils import secure_filename
+
+from ocr_engine.audio_pipeline import process_audio_job
+from ocr_engine.config import Settings
+from ocr_engine.document_pipeline import process_document_job
+from ocr_engine.image_pipeline import process_image_job
+from ocr_engine.jobs import JobStore
+from ocr_engine.pipeline import process_job
+from ocr_engine.storage import ensure_dirs
+from ocr_engine.video_pipeline import process_video_job
+
+
+def create_app():
+    app = Flask(__name__)
+    app.secret_key = os.environ.get("SECRET_KEY", "fileforge-dev-key-change-in-production")
+    settings = Settings()
+    ensure_dirs(settings.data_dir, settings.upload_dir, settings.result_dir)
+    job_store = JobStore(settings.db_path)
+    executor = ThreadPoolExecutor(max_workers=2)
+
+    @app.context_processor
+    def inject_now():
+        return {"now": datetime.utcnow()}
+    ocr_ext = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
+    # ImageMagick supported formats (via Wand)
+    image_ext = {
+        # Common formats
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff", ".ico",
+        # Modern formats
+        ".heic", ".heif", ".avif", ".jxl",
+        # Vector/special
+        ".svg", ".svgz", ".eps", ".pdf", ".psd", ".xcf",
+        # RAW camera formats
+        ".nef", ".cr2", ".cr3", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef", ".srw", ".raw",
+        # Other formats
+        ".hdr", ".exr", ".tga", ".pcx", ".ppm", ".pgm", ".pbm", ".pnm", ".ico", ".cur",
+        ".dds", ".jp2", ".j2k", ".jpc", ".jpx", ".mng", ".jng", ".wbmp", ".xbm", ".xpm",
+    }
+    # Document formats (via Pandoc)
+    document_ext = {
+        ".docx", ".doc", ".md", ".html", ".htm", ".rtf",
+        ".csv", ".tsv", ".json", ".rst", ".epub", ".odt", ".docbook", ".xml", ".txt",
+    }
+    # Audio/video formats (via pydub/FFmpeg)
+    audio_ext = {
+        # Audio formats
+        ".mp3", ".wav", ".flac", ".ogg", ".oga", ".opus", ".aac", ".m4a",
+        ".wma", ".amr", ".ac3", ".aiff", ".aifc", ".aif", ".mp2", ".au",
+        ".m4b", ".voc", ".weba", ".alac", ".caf", ".mpc", ".mogg",
+        # Video formats (extract audio)
+        ".mp4", ".mkv", ".avi", ".mov", ".webm", ".ts", ".mts", ".m2ts",
+        ".wmv", ".mpg", ".mpeg", ".flv", ".f4v", ".vob", ".m4v", ".3gp",
+        ".3g2", ".mxf", ".ogv", ".rm", ".rmvb", ".divx",
+    }
+    # Video formats (via FFmpeg)
+    video_ext = {
+        ".mkv", ".mp4", ".webm", ".avi", ".wmv", ".mov", ".gif",
+        ".mts", ".ts", ".m2ts", ".mpg", ".mpeg", ".flv", ".f4v",
+        ".vob", ".m4v", ".3gp", ".3g2", ".mxf", ".ogv", ".rm",
+        ".rmvb", ".h264", ".divx", ".swf", ".amv", ".asf", ".nut",
+    }
+
+    @app.route("/")
+    def index():
+        return render_template("index.html")
+
+    @app.route("/results/<job_id>")
+    def result_page(job_id):
+        job = job_store.get_job(job_id)
+        if not job:
+            return redirect(url_for("index"))
+        return render_template("result.html", job=job)
+
+    @app.route("/api/jobs", methods=["POST"])
+    def create_job():
+        if "file" not in request.files:
+            return jsonify({"error": "file is required"}), 400
+        file = request.files["file"]
+        if file.filename == "":
+            return jsonify({"error": "file is required"}), 400
+
+        max_bytes = settings.max_file_mb * 1024 * 1024
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
+        if file_size > max_bytes:
+            return jsonify({"error": f"file exceeds {settings.max_file_mb} MB"}), 400
+
+        filename = secure_filename(file.filename)
+        ext = os.path.splitext(filename)[1].lower()
+
+        job_type = request.form.get("job_type", "ocr")
+
+        # Validate extension based on job type
+        if job_type == "image":
+            if ext not in image_ext:
+                return jsonify({"error": "unsupported file type for image conversion"}), 400
+        elif job_type == "document":
+            if ext not in document_ext:
+                return jsonify({"error": "unsupported file type for document conversion"}), 400
+        elif job_type == "audio":
+            if ext not in audio_ext:
+                return jsonify({"error": "unsupported file type for audio conversion"}), 400
+        elif job_type == "video":
+            if ext not in video_ext:
+                return jsonify({"error": "unsupported file type for video conversion"}), 400
+        else:
+            if ext not in ocr_ext:
+                return jsonify({"error": "unsupported file type"}), 400
+
+        job_id = str(uuid.uuid4())
+        upload_path = os.path.join(settings.upload_dir, f"{job_id}-{filename}")
+        file.save(upload_path)
+
+        if job_type == "image":
+            options = {
+                "job_type": "image",
+                "output_format": request.form.get("output_format", "png"),
+                "quality": request.form.get("quality", "85"),
+                "resize_width": request.form.get("resize_width"),
+                "resize_height": request.form.get("resize_height"),
+                "resize_percent": request.form.get("resize_percent"),
+                "dpi": request.form.get("dpi"),
+                "grayscale": request.form.get("grayscale") == "true",
+                "rotation": request.form.get("rotation", "0"),
+                "brightness": request.form.get("brightness", "1.0"),
+                "contrast": request.form.get("contrast", "1.0"),
+            }
+            job_store.create_job(job_id, filename, options)
+            executor.submit(process_image_job, job_id, upload_path, options, settings, job_store)
+        elif job_type == "document":
+            options = {
+                "job_type": "document",
+                "output_format": request.form.get("output_format", "pdf"),
+            }
+            job_store.create_job(job_id, filename, options)
+            executor.submit(process_document_job, job_id, upload_path, options, settings, job_store)
+        elif job_type == "audio":
+            options = {
+                "job_type": "audio",
+                "output_format": request.form.get("output_format", "mp3"),
+                "bitrate": request.form.get("bitrate", "192"),
+            }
+            job_store.create_job(job_id, filename, options)
+            executor.submit(process_audio_job, job_id, upload_path, options, settings, job_store)
+        elif job_type == "video":
+            options = {
+                "job_type": "video",
+                "output_format": request.form.get("output_format", "mp4"),
+                "quality": request.form.get("quality", "medium"),
+            }
+            job_store.create_job(job_id, filename, options)
+            executor.submit(process_video_job, job_id, upload_path, options, settings, job_store)
+        else:
+            options = {
+                "job_type": "ocr",
+                "mode": request.form.get("mode", "text"),
+                "ocr_engine": request.form.get("ocr_engine", "tesseract"),
+            }
+            job_store.create_job(job_id, filename, options)
+            executor.submit(process_job, job_id, upload_path, options, settings, job_store)
+
+        return jsonify(
+            {
+                "job_id": job_id,
+                "status": "queued",
+                "result_url": url_for("get_job_result", job_id=job_id),
+            }
+        )
+
+    @app.route("/api/jobs/<job_id>", methods=["GET"])
+    def get_job(job_id):
+        job = job_store.get_job(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+        return jsonify(job)
+
+    @app.route("/api/jobs/<job_id>/result", methods=["GET"])
+    def get_job_result(job_id):
+        job = job_store.get_job(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+        if job["status"] not in ("completed", "failed"):
+            return jsonify({"status": job["status"]}), 202
+        if not job["result_path"]:
+            return jsonify({"error": "result not available"}), 404
+        with open(job["result_path"], "r", encoding="utf-8") as handle:
+            return jsonify(json.load(handle))
+
+    @app.route("/api/jobs/<job_id>/download/<fmt>", methods=["GET"])
+    def download_result(job_id, fmt):
+        job = job_store.get_job(job_id)
+        if not job:
+            return jsonify({"error": "job not found"}), 404
+
+        # Use original filename with _OCR suffix
+        original_name = os.path.splitext(job.get("filename", job_id))[0]
+        base_name = f"{original_name}_OCR"
+
+        if fmt == "txt":
+            if job["text_path"] and os.path.exists(job["text_path"]):
+                return send_file(job["text_path"], as_attachment=True, download_name=f"{base_name}.txt")
+            return jsonify({"error": "text file not available"}), 404
+
+        if fmt == "json":
+            if job["result_path"] and os.path.exists(job["result_path"]):
+                return send_file(job["result_path"], as_attachment=True, download_name=f"{base_name}.json")
+            return jsonify({"error": "json file not available"}), 404
+
+        if fmt == "pdf":
+            if job.get("pdf_path") and os.path.exists(job["pdf_path"]):
+                return send_file(job["pdf_path"], as_attachment=True, download_name=f"{base_name}.pdf")
+            return jsonify({"error": "PDF not available for this processing mode"}), 404
+
+        if fmt == "image":
+            options = job.get("options", {})
+            if options.get("job_type") != "image":
+                return jsonify({"error": "not an image conversion job"}), 400
+            image_path = job.get("image_path")
+            if not image_path or not os.path.exists(image_path):
+                return jsonify({"error": "converted image not available"}), 404
+            output_format = options.get("output_format", "png")
+            original_name = os.path.splitext(job.get("filename", job_id))[0]
+            download_name = f"{original_name}_converted.{output_format}"
+            return send_file(image_path, as_attachment=True, download_name=download_name)
+
+        if fmt == "document":
+            options = job.get("options", {})
+            if options.get("job_type") != "document":
+                return jsonify({"error": "not a document conversion job"}), 400
+            document_path = job.get("document_path")
+            if not document_path or not os.path.exists(document_path):
+                return jsonify({"error": "converted document not available"}), 404
+            output_format = options.get("output_format", "pdf")
+            original_name = os.path.splitext(job.get("filename", job_id))[0]
+            download_name = f"{original_name}_converted.{output_format}"
+            return send_file(document_path, as_attachment=True, download_name=download_name)
+
+        if fmt == "audio":
+            options = job.get("options", {})
+            if options.get("job_type") != "audio":
+                return jsonify({"error": "not an audio conversion job"}), 400
+            audio_path = job.get("audio_path")
+            if not audio_path or not os.path.exists(audio_path):
+                return jsonify({"error": "converted audio not available"}), 404
+            output_format = options.get("output_format", "mp3")
+            original_name = os.path.splitext(job.get("filename", job_id))[0]
+            download_name = f"{original_name}_converted.{output_format}"
+            return send_file(audio_path, as_attachment=True, download_name=download_name)
+
+        if fmt == "video":
+            options = job.get("options", {})
+            if options.get("job_type") != "video":
+                return jsonify({"error": "not a video conversion job"}), 400
+            video_path = job.get("video_path")
+            if not video_path or not os.path.exists(video_path):
+                return jsonify({"error": "converted video not available"}), 404
+            output_format = options.get("output_format", "mp4")
+            original_name = os.path.splitext(job.get("filename", job_id))[0]
+            download_name = f"{original_name}_converted.{output_format}"
+            return send_file(video_path, as_attachment=True, download_name=download_name)
+
+        return jsonify({"error": "unsupported format"}), 400
+
+    @app.route("/about")
+    def about():
+        return render_template("about.html")
+
+    @app.route("/contact", methods=["GET", "POST"])
+    def contact():
+        if request.method == "POST":
+            name = request.form.get("name", "").strip()
+            email = request.form.get("email", "").strip()
+            subject = request.form.get("subject", "").strip()
+            message = request.form.get("message", "").strip()
+
+            if not name or not email or not message:
+                flash("Please fill in all required fields.", "error")
+                return render_template("contact.html")
+
+            try:
+                job_store.save_contact_submission(name, email, subject, message)
+                flash("Thank you for your message! We'll get back to you soon.", "success")
+                return redirect(url_for("contact"))
+            except Exception:
+                flash("An error occurred. Please try again.", "error")
+
+        return render_template("contact.html")
+
+    @app.route("/terms")
+    def terms():
+        return render_template("terms.html")
+
+    @app.route("/privacy")
+    def privacy():
+        return render_template("privacy.html")
+
+    @app.route("/robots.txt")
+    def robots():
+        content = """User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /results/
+
+Sitemap: {host}sitemap.xml
+""".format(host=request.host_url)
+        return Response(content, mimetype="text/plain")
+
+    @app.route("/sitemap.xml")
+    def sitemap():
+        return render_template("sitemap.xml"), 200, {"Content-Type": "application/xml"}
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    app.run(debug=True, port=5001)

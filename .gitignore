@@ -1,0 +1,86 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Data directories
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads and results (generated at runtime)
+uploads/
+results/
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Thumbnails
+._*
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+tmp/
+
+# Test files and artifacts
+test_*.pdf
+test_*.png
+test_*.py
+
+# JAR files (Tika server)
+*.jar
+
+# Plan files
+PLAN.md
+WORKFLOW_CHANGES.md

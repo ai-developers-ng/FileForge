@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+
+{% block title %}About Us | FileForge{% endblock %}
+{% block meta_description %}Learn about FileForge - your free online file converter and OCR tool. Convert images, documents, audio, and video files with powerful technology.{% endblock %}
+
+{% block content %}
+<div class="static-page">
+    <h1>About FileForge</h1>
+    <p class="page-subtitle">Your all-in-one file conversion platform</p>
+
+    <p>FileForge is a powerful, free online tool designed to make file conversion and text extraction simple and accessible for everyone. Whether you need to extract text from scanned documents, convert images between formats, or transform audio and video files, FileForge has you covered.</p>
+
+    <h2>Our Mission</h2>
+    <p>We believe that powerful file conversion tools should be accessible to everyone, without complicated software installations or expensive subscriptions. FileForge brings professional-grade conversion capabilities directly to your browser.</p>
+
+    <div class="about-features">
+        <div class="about-feature">
+            <div class="about-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="16" y1="13" x2="8" y2="13"/>
+                    <line x1="16" y1="17" x2="8" y2="17"/>
+                    <polyline points="10 9 9 9 8 9"/>
+                </svg>
+            </div>
+            <h3>OCR Technology</h3>
+            <p>Extract text from scanned documents and images with high accuracy using Tesseract OCR.</p>
+        </div>
+
+        <div class="about-feature">
+            <div class="about-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                </svg>
+            </div>
+            <h3>Image Conversion</h3>
+            <p>Support for 200+ image formats including RAW, HEIC, WebP, and professional formats.</p>
+        </div>
+
+        <div class="about-feature">
+            <div class="about-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+            </div>
+            <h3>Audio Processing</h3>
+            <p>Convert between audio formats and extract audio from video files with FFmpeg.</p>
+        </div>
+
+        <div class="about-feature">
+            <div class="about-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polygon points="23 7 16 12 23 17 23 7"/>
+                    <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+                </svg>
+            </div>
+            <h3>Video Conversion</h3>
+            <p>Transform videos between formats with quality control and optimization options.</p>
+        </div>
+
+        <div class="about-feature">
+            <div class="about-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+            </div>
+            <h3>Document Conversion</h3>
+            <p>Convert between PDF, DOCX, HTML, Markdown, and other document formats.</p>
+        </div>
+
+        <div class="about-feature">
+            <div class="about-feature-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                </svg>
+            </div>
+            <h3>Privacy First</h3>
+            <p>Your files are processed securely and automatically deleted after conversion.</p>
+        </div>
+    </div>
+
+    <h2>Technology Stack</h2>
+    <p>FileForge is built using industry-standard open-source technologies:</p>
+
+    <div class="tech-stack">
+        <span class="tech-badge">Tesseract OCR</span>
+        <span class="tech-badge">ImageMagick</span>
+        <span class="tech-badge">FFmpeg</span>
+        <span class="tech-badge">Pandoc</span>
+        <span class="tech-badge">Python Flask</span>
+        <span class="tech-badge">Apache Tika</span>
+    </div>
+
+    <h2>Get Started</h2>
+    <p>Ready to convert your files? Head to our <a href="{{ url_for('index') }}">home page</a> and start converting in seconds. No signup required, no software to install - just upload and convert.</p>
+
+    <p>Have questions or feedback? <a href="{{ url_for('contact') }}">Contact us</a> - we'd love to hear from you!</p>
+</div>
+{% endblock %}

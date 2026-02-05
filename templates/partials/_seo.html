@@ -1,0 +1,30 @@
+<!-- Primary Meta Tags -->
+<title>{% block title %}FileForge - Convert Files, Extract Text, Transform Media{% endblock %}</title>
+<meta name="title" content="{{ self.title() }}">
+<meta name="description" content="{% block meta_description %}Free online file converter and OCR tool. Convert images, documents, audio, and video files. Extract text from PDFs and scanned documents with powerful OCR technology.{% endblock %}">
+<meta name="keywords" content="{% block meta_keywords %}file converter, OCR, text extraction, PDF to text, image converter, audio converter, video converter, document converter, online converter, free converter{% endblock %}">
+<meta name="author" content="FileForge">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="{{ request.url }}">
+
+<!-- Open Graph / Facebook -->
+<meta property="og:type" content="{% block og_type %}website{% endblock %}">
+<meta property="og:url" content="{{ request.url }}">
+<meta property="og:title" content="{{ self.title() }}">
+<meta property="og:description" content="{{ self.meta_description() }}">
+<meta property="og:image" content="{{ url_for('static', filename='images/og-image.png', _external=True) }}">
+<meta property="og:site_name" content="FileForge">
+<meta property="og:locale" content="en_US">
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:url" content="{{ request.url }}">
+<meta name="twitter:title" content="{{ self.title() }}">
+<meta name="twitter:description" content="{{ self.meta_description() }}">
+<meta name="twitter:image" content="{{ url_for('static', filename='images/og-image.png', _external=True) }}">
+
+<!-- Mobile App -->
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="FileForge">

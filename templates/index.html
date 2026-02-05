@@ -1,0 +1,486 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="page">
+    <header class="hero-header">
+        <h1>FileForge</h1>
+        <p>Transform your files with powerful conversion tools. OCR, images, audio, video, and documents - all in one place.</p>
+    </header>
+
+    <div class="converter-card">
+        <div class="tab-row" role="tablist" aria-label="Conversion types">
+            <button class="tab active" role="tab" aria-selected="true" data-tab="ocr">OCR</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="image">Image</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="audio">Audio</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="video">Video</button>
+            <button class="tab" role="tab" aria-selected="false" data-tab="document">Document</button>
+        </div>
+
+        <!-- OCR Tab Panel -->
+        <div class="tab-panel active" id="ocr-panel">
+            <section class="converter-form">
+                <h2>Document OCR Workspace</h2>
+                <p>Extract text from PDFs and scans while preserving layout in a searchable PDF.</p>
+
+                <form id="uploadForm">
+                    <div class="dropzone" id="dropzone">
+                        <div class="drop-icon">&#11014;</div>
+                        <div>
+                            <h3>Click to upload or drag and drop</h3>
+                            <p>Supported: PDF, PNG, JPG, TIFF (Max 25MB)</p>
+                        </div>
+                        <input type="file" id="fileInput" name="file" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp" multiple>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Processing mode</span>
+                        <div class="pill-row">
+                            <label class="pill">
+                                <input type="radio" name="mode" value="text" checked>
+                                Text extraction only
+                            </label>
+                            <label class="pill">
+                                <input type="radio" name="mode" value="ocr">
+                                PDF to OCRd PDF
+                            </label>
+                            <label class="pill">
+                                <input type="radio" name="mode" value="both">
+                                OCR + Text extraction
+                            </label>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="ocr_engine" value="tesseract">
+                    <input type="hidden" name="job_type" value="ocr">
+
+                    <button class="primary full" type="submit">RUN</button>
+                </form>
+
+                <div class="file-list" id="fileList"></div>
+                <div class="status-message" id="statusMessage">Ready to process.</div>
+            </section>
+
+            <aside class="converter-results">
+                <div class="results-header">
+                    <div>
+                        <h2>Results</h2>
+                        <p>Watch progress and download your outputs.</p>
+                    </div>
+                    <span class="status-pill">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+
+                <div class="progress-wrap" aria-live="polite">
+                    <div class="progress-label">
+                        <span>Progress</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+
+                <div class="result-preview" id="resultPreview">
+                    <div class="result-meta">
+                        <span id="resultFilename">Awaiting upload</span>
+                        <span class="meta-chip" id="resultStatus">Idle</span>
+                    </div>
+                    <textarea class="result-textarea" id="resultText" readonly>Your extracted text will appear here.</textarea>
+                </div>
+
+                <div class="result-actions">
+                    <a class="ghost btn" id="downloadTxt" href="#" aria-disabled="true">Download TXT</a>
+                    <a class="ghost btn" id="downloadJson" href="#" aria-disabled="true">Download JSON</a>
+                    <a class="ghost btn" id="downloadPdf" href="#" aria-disabled="true">Download PDF</a>
+                    <button class="primary" id="copyText">Copy text</button>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Image Converter Tab Panel -->
+        <div class="tab-panel" id="image-panel">
+            <section class="converter-form">
+                <h2>Image Converter Workspace</h2>
+                <p>Convert between formats, resize, compress, and apply adjustments.</p>
+
+                <form id="imageUploadForm">
+                    <div class="dropzone" id="imageDropzone">
+                        <div class="drop-icon">&#11014;</div>
+                        <div>
+                            <h3>Click to upload or drag and drop</h3>
+                            <p>200+ formats: PNG, JPG, WebP, HEIC, RAW, PSD, SVG... (Max 25MB)</p>
+                        </div>
+                        <input type="file" id="imageFileInput" name="file" accept=".png,.jpg,.jpeg,.webp,.bmp,.tif,.tiff,.gif,.heic,.heif,.avif,.jxl,.svg,.eps,.pdf,.psd,.xcf,.nef,.cr2,.cr3,.arw,.dng,.raf,.orf,.rw2,.pef,.srw,.raw,.hdr,.exr,.tga,.ico" multiple>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Output Format</span>
+                        <div class="pill-row">
+                            <label class="pill"><input type="radio" name="output_format" value="png" checked> PNG</label>
+                            <label class="pill"><input type="radio" name="output_format" value="jpg"> JPG</label>
+                            <label class="pill"><input type="radio" name="output_format" value="webp"> WebP</label>
+                            <label class="pill"><input type="radio" name="output_format" value="gif"> GIF</label>
+                            <label class="pill"><input type="radio" name="output_format" value="tiff"> TIFF</label>
+                            <label class="pill"><input type="radio" name="output_format" value="bmp"> BMP</label>
+                            <label class="pill"><input type="radio" name="output_format" value="ico"> ICO</label>
+                            <label class="pill"><input type="radio" name="output_format" value="pdf"> PDF</label>
+                        </div>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Quality (for JPG/WebP): <span id="qualityValue">85</span>%</span>
+                        <input type="range" name="quality" id="qualitySlider" min="1" max="100" value="85" class="slider">
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Resize</span>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label>Width (px)</label>
+                                <input type="number" name="resize_width" placeholder="Auto" min="1">
+                            </div>
+                            <div class="field">
+                                <label>Height (px)</label>
+                                <input type="number" name="resize_height" placeholder="Auto" min="1">
+                            </div>
+                            <div class="field">
+                                <label>Scale (%)</label>
+                                <input type="number" name="resize_percent" placeholder="100" min="1" max="500">
+                            </div>
+                            <div class="field">
+                                <label>DPI</label>
+                                <input type="number" name="dpi" placeholder="72" min="1">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Adjustments</span>
+                        <div class="field-grid">
+                            <div class="field">
+                                <label>Rotation</label>
+                                <select name="rotation" class="select">
+                                    <option value="0">None</option>
+                                    <option value="90">90&deg; CW</option>
+                                    <option value="180">180&deg;</option>
+                                    <option value="270">90&deg; CCW</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label>Brightness: <span id="brightnessValue">100</span>%</label>
+                                <input type="range" name="brightness" id="brightnessSlider" min="0" max="200" value="100" class="slider">
+                            </div>
+                            <div class="field">
+                                <label>Contrast: <span id="contrastValue">100</span>%</label>
+                                <input type="range" name="contrast" id="contrastSlider" min="0" max="200" value="100" class="slider">
+                            </div>
+                        </div>
+                        <label class="pill" style="margin-top: 10px;">
+                            <input type="checkbox" name="grayscale"> Convert to Grayscale
+                        </label>
+                    </div>
+
+                    <input type="hidden" name="job_type" value="image">
+
+                    <button class="primary full" type="submit">CONVERT</button>
+                </form>
+
+                <div class="file-list" id="imageFileList"></div>
+                <div class="status-message" id="imageStatusMessage">Ready to convert.</div>
+            </section>
+
+            <aside class="converter-results">
+                <div class="results-header">
+                    <div>
+                        <h2>Results</h2>
+                        <p>Watch progress and download your converted images.</p>
+                    </div>
+                    <span class="status-pill">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+
+                <div class="progress-wrap" aria-live="polite">
+                    <div class="progress-label">
+                        <span>Progress</span>
+                        <span id="imageProgressPercent">0%</span>
+                    </div>
+                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div class="progress-fill" id="imageProgressFill"></div>
+                    </div>
+                </div>
+
+                <div class="result-preview">
+                    <div class="result-meta">
+                        <span id="imageResultFilename">Awaiting upload</span>
+                        <span class="meta-chip" id="imageResultStatus">Idle</span>
+                    </div>
+                    <div class="image-preview-area" id="imagePreviewArea">
+                        <p>Converted image preview will appear here.</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Audio Converter Tab Panel -->
+        <div class="tab-panel" id="audio-panel">
+            <section class="converter-form">
+                <h2>Audio Converter Workspace</h2>
+                <p>Convert audio files and extract audio from video files.</p>
+
+                <form id="audioUploadForm">
+                    <div class="dropzone" id="audioDropzone">
+                        <div class="drop-icon">&#11014;</div>
+                        <div>
+                            <h3>Click to upload or drag and drop</h3>
+                            <p>Audio: MP3, WAV, FLAC, AAC, OGG, M4A... Video: MP4, MKV, AVI, MOV... (Max 25MB)</p>
+                        </div>
+                        <input type="file" id="audioFileInput" name="file" accept=".mp3,.wav,.flac,.ogg,.oga,.opus,.aac,.m4a,.wma,.amr,.ac3,.aiff,.aifc,.aif,.mp2,.au,.m4b,.voc,.weba,.alac,.caf,.mpc,.mogg,.mp4,.mkv,.avi,.mov,.webm,.ts,.mts,.m2ts,.wmv,.mpg,.mpeg,.flv,.f4v,.vob,.m4v,.3gp,.3g2,.mxf,.ogv,.rm,.rmvb,.divx" multiple>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Output Format</span>
+                        <div class="pill-row">
+                            <label class="pill"><input type="radio" name="output_format" value="mp3" checked> MP3</label>
+                            <label class="pill"><input type="radio" name="output_format" value="wav"> WAV</label>
+                            <label class="pill"><input type="radio" name="output_format" value="flac"> FLAC</label>
+                            <label class="pill"><input type="radio" name="output_format" value="aac"> AAC</label>
+                            <label class="pill"><input type="radio" name="output_format" value="ogg"> OGG</label>
+                            <label class="pill"><input type="radio" name="output_format" value="m4a"> M4A</label>
+                            <label class="pill"><input type="radio" name="output_format" value="opus"> OPUS</label>
+                        </div>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Bitrate (for lossy formats)</span>
+                        <div class="pill-row">
+                            <label class="pill"><input type="radio" name="bitrate" value="128"> 128 kbps</label>
+                            <label class="pill"><input type="radio" name="bitrate" value="192" checked> 192 kbps</label>
+                            <label class="pill"><input type="radio" name="bitrate" value="256"> 256 kbps</label>
+                            <label class="pill"><input type="radio" name="bitrate" value="320"> 320 kbps</label>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="job_type" value="audio">
+
+                    <button class="primary full" type="submit">CONVERT</button>
+                </form>
+
+                <div class="file-list" id="audioFileList"></div>
+                <div class="status-message" id="audioStatusMessage">Ready to convert.</div>
+            </section>
+
+            <aside class="converter-results">
+                <div class="results-header">
+                    <div>
+                        <h2>Results</h2>
+                        <p>Watch progress and download your converted audio.</p>
+                    </div>
+                    <span class="status-pill">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+
+                <div class="progress-wrap" aria-live="polite">
+                    <div class="progress-label">
+                        <span>Progress</span>
+                        <span id="audioProgressPercent">0%</span>
+                    </div>
+                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div class="progress-fill" id="audioProgressFill"></div>
+                    </div>
+                </div>
+
+                <div class="result-preview">
+                    <div class="result-meta">
+                        <span id="audioResultFilename">Awaiting upload</span>
+                        <span class="meta-chip" id="audioResultStatus">Idle</span>
+                    </div>
+                    <div class="audio-preview-area" id="audioPreviewArea">
+                        <p>Converted audio will be available for download.</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Video Converter Tab Panel -->
+        <div class="tab-panel" id="video-panel">
+            <section class="converter-form">
+                <h2>Video Converter Workspace</h2>
+                <p>Convert video files between formats with quality control.</p>
+
+                <form id="videoUploadForm">
+                    <div class="dropzone" id="videoDropzone">
+                        <div class="drop-icon">&#11014;</div>
+                        <div>
+                            <h3>Click to upload or drag and drop</h3>
+                            <p>Supported: MP4, MKV, WebM, AVI, MOV, WMV, FLV, GIF... (Max 25MB)</p>
+                        </div>
+                        <input type="file" id="videoFileInput" name="file" accept=".mkv,.mp4,.webm,.avi,.wmv,.mov,.gif,.mts,.ts,.m2ts,.mpg,.mpeg,.flv,.f4v,.vob,.m4v,.3gp,.3g2,.mxf,.ogv,.rm,.rmvb,.h264,.divx,.swf,.amv,.asf,.nut" multiple>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Output Format</span>
+                        <div class="pill-row">
+                            <label class="pill"><input type="radio" name="output_format" value="mp4" checked> MP4</label>
+                            <label class="pill"><input type="radio" name="output_format" value="webm"> WebM</label>
+                            <label class="pill"><input type="radio" name="output_format" value="avi"> AVI</label>
+                            <label class="pill"><input type="radio" name="output_format" value="mkv"> MKV</label>
+                            <label class="pill"><input type="radio" name="output_format" value="mov"> MOV</label>
+                            <label class="pill"><input type="radio" name="output_format" value="gif"> GIF</label>
+                            <label class="pill"><input type="radio" name="output_format" value="wmv"> WMV</label>
+                            <label class="pill"><input type="radio" name="output_format" value="flv"> FLV</label>
+                        </div>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Quality</span>
+                        <div class="pill-row">
+                            <label class="pill"><input type="radio" name="quality" value="low"> Low (smaller file)</label>
+                            <label class="pill"><input type="radio" name="quality" value="medium" checked> Medium (balanced)</label>
+                            <label class="pill"><input type="radio" name="quality" value="high"> High (best quality)</label>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="job_type" value="video">
+
+                    <button class="primary full" type="submit">CONVERT</button>
+                </form>
+
+                <div class="file-list" id="videoFileList"></div>
+                <div class="status-message" id="videoStatusMessage">Ready to convert.</div>
+            </section>
+
+            <aside class="converter-results">
+                <div class="results-header">
+                    <div>
+                        <h2>Results</h2>
+                        <p>Watch progress and download your converted video.</p>
+                    </div>
+                    <span class="status-pill">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+
+                <div class="progress-wrap" aria-live="polite">
+                    <div class="progress-label">
+                        <span>Progress</span>
+                        <span id="videoProgressPercent">0%</span>
+                    </div>
+                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div class="progress-fill" id="videoProgressFill"></div>
+                    </div>
+                </div>
+
+                <div class="result-preview">
+                    <div class="result-meta">
+                        <span id="videoResultFilename">Awaiting upload</span>
+                        <span class="meta-chip" id="videoResultStatus">Idle</span>
+                    </div>
+                    <div class="video-preview-area" id="videoPreviewArea">
+                        <p>Converted video will be available for download.</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Document Converter Tab Panel -->
+        <div class="tab-panel" id="document-panel">
+            <section class="converter-form">
+                <h2>Document Converter Workspace</h2>
+                <p>Convert between document formats: DOCX, PDF, HTML, Markdown, and more.</p>
+
+                <form id="documentUploadForm">
+                    <div class="dropzone" id="documentDropzone">
+                        <div class="drop-icon">&#11014;</div>
+                        <div>
+                            <h3>Click to upload or drag and drop</h3>
+                            <p>Supported: DOCX, DOC, MD, HTML, RTF, CSV, EPUB, ODT... (Max 25MB)</p>
+                        </div>
+                        <input type="file" id="documentFileInput" name="file" accept=".docx,.doc,.md,.html,.htm,.rtf,.csv,.tsv,.json,.rst,.epub,.odt,.docbook,.xml,.txt" multiple>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Output Format</span>
+                        <div class="pill-row">
+                            <label class="pill"><input type="radio" name="output_format" value="pdf" checked> PDF</label>
+                            <label class="pill"><input type="radio" name="output_format" value="docx"> DOCX</label>
+                            <label class="pill"><input type="radio" name="output_format" value="html"> HTML</label>
+                            <label class="pill"><input type="radio" name="output_format" value="txt"> TXT</label>
+                            <label class="pill"><input type="radio" name="output_format" value="md"> Markdown</label>
+                        </div>
+                    </div>
+
+                    <input type="hidden" name="job_type" value="document">
+
+                    <button class="primary full" type="submit">CONVERT</button>
+                </form>
+
+                <div class="file-list" id="documentFileList"></div>
+                <div class="status-message" id="documentStatusMessage">Ready to convert.</div>
+            </section>
+
+            <aside class="converter-results">
+                <div class="results-header">
+                    <div>
+                        <h2>Results</h2>
+                        <p>Watch progress and download your converted documents.</p>
+                    </div>
+                    <span class="status-pill">
+                        <span class="status-dot"></span>
+                        Ready
+                    </span>
+                </div>
+
+                <div class="progress-wrap" aria-live="polite">
+                    <div class="progress-label">
+                        <span>Progress</span>
+                        <span id="documentProgressPercent">0%</span>
+                    </div>
+                    <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                        <div class="progress-fill" id="documentProgressFill"></div>
+                    </div>
+                </div>
+
+                <div class="result-preview">
+                    <div class="result-meta">
+                        <span id="documentResultFilename">Awaiting upload</span>
+                        <span class="meta-chip" id="documentResultStatus">Idle</span>
+                    </div>
+                    <div class="document-preview-area" id="documentPreviewArea">
+                        <p>Converted document will be available for download.</p>
+                    </div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <section class="feature-grid">
+        <div class="feature-card">
+            <h3>OCR Extraction</h3>
+            <p>Extract text from images and PDFs with powerful OCR technology.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Image Conversion</h3>
+            <p>Convert between 200+ image formats including RAW, HEIC, and WebP.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Audio Conversion</h3>
+            <p>Convert audio formats and extract audio from video files.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Video Conversion</h3>
+            <p>Convert video formats with quality control using FFmpeg.</p>
+        </div>
+        <div class="feature-card">
+            <h3>Document Conversion</h3>
+            <p>Convert between PDF, DOCX, HTML, Markdown, and more.</p>
+        </div>
+    </section>
+</div>
+{% endblock %}

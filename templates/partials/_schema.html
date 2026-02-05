@@ -1,0 +1,31 @@
+<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "FileForge",
+    "description": "Free online file converter and OCR tool. Convert images, documents, audio, and video files. Extract text from PDFs and scanned documents.",
+    "url": "{{ request.host_url }}",
+    "applicationCategory": "UtilityApplication",
+    "operatingSystem": "Web Browser",
+    "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+    },
+    "featureList": [
+        "OCR text extraction from images and PDFs",
+        "PDF to searchable PDF conversion",
+        "Image format conversion (200+ formats)",
+        "Audio format conversion and extraction",
+        "Video format conversion",
+        "Document format conversion"
+    ],
+    "screenshot": "{{ url_for('static', filename='images/og-image.png', _external=True) }}",
+    "softwareVersion": "1.0",
+    "author": {
+        "@type": "Organization",
+        "name": "FileForge"
+    }
+}
+</script>
+{% block extra_schema %}{% endblock %}

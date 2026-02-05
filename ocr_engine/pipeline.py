@@ -1,0 +1,281 @@
+import mimetypes
+import os
+import traceback
+import logging
+
+from .ocr import open_image, run_tesseract
+from .pdf_output import write_ocr_pdf_from_images, write_text_pdf
+from .storage import result_paths
+from .tika_client import TikaClient
+
+# Configure logger
+logger = logging.getLogger(__name__)
+
+
+def _is_pdf(file_path):
+    return os.path.splitext(file_path)[1].lower() == ".pdf"
+
+
+def _is_image(file_path):
+    mime = mimetypes.guess_type(file_path)[0] or ""
+    return mime.startswith("image/")
+
+
+def _pdf_to_images(file_path):
+    from pdf2image import convert_from_path
+
+    return convert_from_path(file_path)
+
+
+def process_job(job_id, file_path, options, settings, job_store):
+    """Process a document extraction job.
+    
+    Modes:
+    - 'text': Text extraction only (Tika), no OCR, no PDF output
+    - 'ocr': OCR only, generates PDF with images + OCR layer, no text extraction
+    - 'both': OCR + Text extraction, generates PDF and extracts text from it
+    
+    Args:
+        job_id: Unique job identifier
+        file_path: Path to the uploaded file
+        options: Processing options (mode, ocr_engine, etc.)
+        settings: Application settings
+        job_store: Job storage instance
+    """
+    mode = options.get("mode", "text")
+    ocr_engine = options.get("ocr_engine", "tesseract")
+    
+    logger.info(f"Processing job {job_id}: file={os.path.basename(file_path)}, "
+               f"mode={mode}, ocr_engine={ocr_engine}")
+
+    result = {
+        "job_id": job_id,
+        "filename": os.path.basename(file_path),
+        "tika_text": "",
+        "ocr_text": "",
+        "final_text": "",
+        "metadata": {},
+        "pages": [],
+        "errors": [],
+        "options": options,
+    }
+
+    try:
+        job_store.update_job(job_id, status="running", progress=0)
+
+        # Mode: 'text' - Text extraction only, no OCR
+        if mode == "text":
+            logger.info(f"Text-only mode for job {job_id}")
+            try:
+                tika = TikaClient(settings.tika_url)
+                result["tika_text"] = tika.extract_text(file_path)
+                result["metadata"] = tika.extract_metadata(file_path)
+                result["final_text"] = result["tika_text"]
+                logger.info(f"Tika extraction completed. Text length: {len(result['tika_text'])}")
+            except Exception as exc:
+                error_msg = f"Tika extraction failed: {exc}"
+                logger.error(error_msg, exc_info=True)
+                result["errors"].append(error_msg)
+            job_store.update_job(job_id, progress=100)
+            
+            # Save results (no PDF generation for text-only mode)
+            json_path, text_path, pdf_path = _persist_result(
+                result, settings.result_dir, job_id, ocr_images=[], generate_pdf=False
+            )
+            
+        # Mode: 'ocr' or 'both' - OCR processing required
+        elif mode in ("ocr", "both"):
+            logger.info(f"OCR mode ({mode}) for job {job_id}")
+            
+            # Convert document to images
+            ocr_images = []
+            if _is_pdf(file_path):
+                try:
+                    logger.info(f"Converting PDF to images for job {job_id}")
+                    ocr_images = _pdf_to_images(file_path)
+                    logger.info(f"PDF converted to {len(ocr_images)} page(s)")
+                except ImportError as exc:
+                    error_msg = "PDF rendering failed: Poppler is not installed. Please install poppler-utils (Linux/Windows) or poppler (macOS via Homebrew: brew install poppler)"
+                    logger.error(error_msg, exc_info=True)
+                    result["errors"].append(error_msg)
+                except Exception as exc:
+                    # Check if it's a Poppler-related error
+                    if "poppler" in str(exc).lower() or "pdfinfonotinstalled" in str(type(exc).__name__).lower():
+                        error_msg = f"PDF rendering failed: Poppler is not installed or not in PATH. Please install poppler-utils (Linux/Windows) or poppler (macOS via Homebrew: brew install poppler). Error: {exc}"
+                    else:
+                        error_msg = f"PDF rendering failed: {exc}"
+                    logger.error(error_msg, exc_info=True)
+                    result["errors"].append(error_msg)
+            elif _is_image(file_path):
+                logger.info(f"Processing image file for job {job_id}")
+                ocr_images = [open_image(file_path)]
+            else:
+                result["errors"].append("Unsupported file type for OCR.")
+            
+            # Run OCR on all images
+            ocr_page_pdfs = []
+            if ocr_images:
+                total_pages = len(ocr_images)
+                for idx, image in enumerate(ocr_images, start=1):
+                    logger.info(f"OCR processing page {idx}/{len(ocr_images)}")
+                    ocr_text = _run_ocr_engine(image, ocr_engine, result)
+                    page_detail = ocr_text.get("detail", {}) or {}
+                    page_pdf_bytes = page_detail.get("tesseract_pdf")
+                    safe_detail = dict(page_detail)
+                    safe_detail.pop("tesseract_pdf", None)
+                    result["pages"].append({
+                        "page": idx,
+                        "text": ocr_text["text"],
+                        "engine": ocr_text["engine"],
+                        "detail": safe_detail
+                    })
+                    ocr_page_pdfs.append(page_pdf_bytes)
+                    progress = int((idx / total_pages) * 100)
+                    job_store.update_job(job_id, progress=progress)
+                
+                result["ocr_text"] = "\n\n".join(page["text"] for page in result["pages"])
+                logger.info(f"OCR completed. Total text length: {len(result['ocr_text'])}")
+                
+                # For 'both' mode, extract text from OCR'd PDF
+                if mode == "both":
+                    result["final_text"] = result["ocr_text"]
+                    logger.info(f"Text extraction enabled (mode=both)")
+                else:
+                    # For 'ocr' mode, no text extraction needed
+                    result["final_text"] = ""
+                    logger.info(f"Text extraction disabled (mode=ocr)")
+            
+            # Save results with PDF generation
+            json_path, text_path, pdf_path = _persist_result(
+                result,
+                settings.result_dir,
+                job_id,
+                ocr_images,
+                ocr_page_pdfs if ocr_images else None,
+                generate_pdf=True,
+            )
+        
+        else:
+            result["errors"].append(f"Invalid mode: {mode}")
+            json_path, text_path, pdf_path = _persist_result(
+                result, settings.result_dir, job_id, ocr_images=[], generate_pdf=False
+            )
+        
+        job_store.update_job(
+            job_id,
+            status="completed",
+            result_path=json_path,
+            text_path=text_path,
+            pdf_path=pdf_path,
+            progress=100,
+        )
+    except Exception as exc:
+        result["errors"].append(str(exc))
+        result["errors"].append(traceback.format_exc())
+        json_path, text_path, pdf_path = _persist_result(
+            result, settings.result_dir, job_id, [], generate_pdf=False
+        )
+        job_store.update_job(
+            job_id,
+            status="failed",
+            result_path=json_path,
+            text_path=text_path,
+            pdf_path=pdf_path,
+            error=str(exc),
+            progress=100,
+        )
+
+
+def _run_ocr_engine(image, engine, result):
+    """Run OCR engine on an image with error handling and logging.
+    
+    Args:
+        image: PIL Image object or numpy array
+        engine: OCR engine name ('tesseract' only)
+        result: Result dictionary to append errors to
+        
+    Returns:
+        Dictionary with 'text', 'engine', and 'detail' keys
+    """
+    try:
+        logger.info(f"Running OCR with engine: {engine}")
+        
+        if engine != "tesseract":
+            raise ValueError(f"Unsupported OCR engine: {engine}")
+        ocr_result = run_tesseract(image)
+        
+        result_dict = ocr_result.__dict__
+        logger.info(f"OCR completed. Engine: {engine}, Text length: {len(result_dict['text'])}, "
+                   f"Detail: {result_dict.get('detail', {})}")
+        
+        return result_dict
+    except Exception as exc:
+        error_msg = f"OCR failed ({engine}): {exc}"
+        logger.error(error_msg, exc_info=True)
+        result["errors"].append(error_msg)
+        return {"text": "", "engine": engine, "detail": {"error": str(exc)}}
+
+
+def _persist_result(result, result_dir, job_id, ocr_images, ocr_page_pdfs=None, generate_pdf=True):
+    """Save job results to disk.
+    
+    Args:
+        result: Result dictionary with extracted text and metadata
+        result_dir: Directory to save results
+        job_id: Job identifier
+        ocr_images: List of PIL images (for PDF generation with images)
+        ocr_page_pdfs: Optional list of per-page PDF bytes (for Tesseract output)
+        generate_pdf: Whether to generate a PDF file (False for text-only mode)
+    
+    Returns:
+        Tuple of (json_path, text_path, pdf_path)
+    """
+    json_path, text_path, pdf_path = result_paths(result_dir, job_id)
+    
+    # Save JSON result
+    with open(json_path, "w", encoding="utf-8") as handle:
+        import json
+        json.dump(result, handle, indent=2)
+    
+    # Save plain text
+    with open(text_path, "w", encoding="utf-8") as handle:
+        handle.write(result.get("final_text", ""))
+    
+    # Generate PDF output (only for OCR modes)
+    if generate_pdf:
+        try:
+            if ocr_images and len(ocr_images) > 0:
+                # Create PDF with images and text overlay (OCR modes only)
+                page_texts = [page.get("text", "") for page in result.get("pages", [])]
+                logger.info(f"Creating OCR PDF with {len(ocr_images)} images and {len(page_texts)} page texts")
+                write_ocr_pdf_from_images(
+                    pdf_path,
+                    result.get("filename", "OCR Output"),
+                    ocr_images,
+                    page_texts,
+                    ocr_page_pdfs,
+                )
+            else:
+                # No images available - skip PDF generation
+                logger.warning(f"No images available for PDF generation (mode might be text-only)")
+                pdf_path = None
+            
+            # Verify PDF was created and has content
+            import os
+            if pdf_path and os.path.exists(pdf_path):
+                pdf_size = os.path.getsize(pdf_path)
+                logger.info(f"PDF created successfully: {pdf_path} ({pdf_size} bytes)")
+                if pdf_size < 500:
+                    logger.warning(f"PDF file is suspiciously small: {pdf_size} bytes")
+            elif pdf_path:
+                logger.error(f"PDF file was not created: {pdf_path}")
+                
+        except Exception as exc:
+            logger.error(f"Failed to create PDF: {exc}", exc_info=True)
+            pdf_path = None
+    else:
+        # Text-only mode - no PDF generation
+        logger.info(f"PDF generation skipped (text-only mode)")
+        pdf_path = None
+    
+    return json_path, text_path, pdf_path

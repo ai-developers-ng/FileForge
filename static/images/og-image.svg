@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0f172a"/>
+      <stop offset="100%" style="stop-color:#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="logo-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="50%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#a855f7"/>
+    </linearGradient>
+    <linearGradient id="text-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ffffff"/>
+      <stop offset="100%" style="stop-color:#c7d2fe"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg-grad)"/>
+
+  <!-- Decorative circles -->
+  <circle cx="100" cy="100" r="200" fill="#6366f1" opacity="0.1"/>
+  <circle cx="1100" cy="530" r="250" fill="#8b5cf6" opacity="0.1"/>
+  <circle cx="900" cy="150" r="150" fill="#a855f7" opacity="0.08"/>
+
+  <!-- Logo icon background -->
+  <rect x="500" y="180" width="80" height="80" rx="16" fill="url(#logo-grad)"/>
+
+  <!-- Lightning bolt icon -->
+  <path d="M548 200L524 232h18l-3 24 24-32h-18l3-24z" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Brand name -->
+  <text x="600" y="340" font-family="Inter, Arial, sans-serif" font-size="72" font-weight="800" fill="url(#text-grad)" text-anchor="middle">FileForge</text>
+
+  <!-- Tagline -->
+  <text x="600" y="400" font-family="Inter, Arial, sans-serif" font-size="28" fill="#94a3b8" text-anchor="middle">Transform your files with powerful conversion tools</text>
+
+  <!-- Feature pills -->
+  <g font-family="Inter, Arial, sans-serif" font-size="18" font-weight="600">
+    <rect x="280" y="460" width="100" height="40" rx="20" fill="#6366f1" opacity="0.2"/>
+    <text x="330" y="486" fill="#a5b4fc" text-anchor="middle">OCR</text>
+
+    <rect x="400" y="460" width="120" height="40" rx="20" fill="#6366f1" opacity="0.2"/>
+    <text x="460" y="486" fill="#a5b4fc" text-anchor="middle">Images</text>
+
+    <rect x="540" y="460" width="120" height="40" rx="20" fill="#6366f1" opacity="0.2"/>
+    <text x="600" y="486" fill="#a5b4fc" text-anchor="middle">Audio</text>
+
+    <rect x="680" y="460" width="120" height="40" rx="20" fill="#6366f1" opacity="0.2"/>
+    <text x="740" y="486" fill="#a5b4fc" text-anchor="middle">Video</text>
+
+    <rect x="820" y="460" width="120" height="40" rx="20" fill="#6366f1" opacity="0.2"/>
+    <text x="880" y="486" fill="#a5b4fc" text-anchor="middle">Docs</text>
+  </g>
+</svg>
