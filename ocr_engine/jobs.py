@@ -130,6 +130,25 @@ class JobStore:
             "video_path": row[14],
         }
 
+    def delete_expired_jobs(self, cutoff_iso):
+        """Delete jobs older than cutoff and return their file paths for cleanup."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "select id, result_path, text_path, pdf_path, image_path, document_path, audio_path, video_path "
+                "from jobs where created_at < ? and status in ('completed', 'failed')",
+                (cutoff_iso,),
+            ).fetchall()
+            if rows:
+                ids = [r[0] for r in rows]
+                conn.execute(
+                    f"delete from jobs where id in ({','.join('?' * len(ids))})",
+                    ids,
+                )
+        paths = []
+        for row in rows:
+            paths.extend(p for p in row[1:] if p)
+        return [r[0] for r in rows], paths
+
     def save_contact_submission(self, name, email, subject, message):
         now = datetime.utcnow().isoformat()
         with self._lock, self._connect() as conn:

@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -14,8 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # ImageMagick
     imagemagick \
     libmagickwand-dev \
-    # Pandoc
+    # Pandoc + LaTeX for PDF generation
     pandoc \
+    texlive-latex-base \
+    texlive-latex-recommended \
+    texlive-fonts-recommended \
+    lmodern \
     # FFmpeg
     ffmpeg \
     # Poppler (for PDF to image)

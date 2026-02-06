@@ -30,7 +30,7 @@ services:
       - "9998:9998"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9998/tika"]
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /tika HTTP/1.0\\r\\n\\r\\n\" > /dev/tcp/localhost/9998'"]
       interval: 30s
       timeout: 10s
       retries: 3

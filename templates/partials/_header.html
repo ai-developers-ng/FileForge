@@ -12,6 +12,7 @@
         <nav class="main-nav" id="mainNav" aria-label="Main navigation">
             <ul class="nav-list">
                 <li><a href="{{ url_for('index') }}" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Home</a></li>
+                <li><a href="{{ url_for('docs') }}" class="nav-link {% if request.endpoint == 'docs' %}active{% endif %}">Docs</a></li>
                 <li><a href="{{ url_for('about') }}" class="nav-link {% if request.endpoint == 'about' %}active{% endif %}">About</a></li>
                 <li><a href="{{ url_for('contact') }}" class="nav-link {% if request.endpoint == 'contact' %}active{% endif %}">Contact</a></li>
             </ul>

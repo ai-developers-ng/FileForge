@@ -1,0 +1,436 @@
+{% extends 'base.html' %}
+
+{% block title %}Documentation | FileForge{% endblock %}
+{% block meta_description %}Complete guide to using FileForge - learn how to use OCR, image conversion, audio/video conversion, document conversion, and the REST API.{% endblock %}
+
+{% block content %}
+<div class="docs-page">
+    <div class="docs-layout">
+        <nav class="docs-sidebar" id="docsSidebar">
+            <div class="docs-sidebar-header">
+                <h3>Documentation</h3>
+            </div>
+            <ul class="docs-nav">
+                <li><a href="#getting-started" class="docs-nav-link active">Getting Started</a></li>
+                <li><a href="#ocr" class="docs-nav-link">OCR & Text Extraction</a></li>
+                <li><a href="#image" class="docs-nav-link">Image Conversion</a></li>
+                <li><a href="#document" class="docs-nav-link">Document Conversion</a></li>
+                <li><a href="#audio" class="docs-nav-link">Audio Conversion</a></li>
+                <li><a href="#video" class="docs-nav-link">Video Conversion</a></li>
+                <li><a href="#api" class="docs-nav-link">REST API</a></li>
+                <li><a href="#self-hosting" class="docs-nav-link">Self-Hosting</a></li>
+                <li><a href="#limits" class="docs-nav-link">Limits & Cleanup</a></li>
+            </ul>
+        </nav>
+
+        <div class="docs-content">
+            <!-- Getting Started -->
+            <section id="getting-started" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </div>
+                <h1>Getting Started</h1>
+                <p class="docs-lead">FileForge is a free, open-source platform for file conversion and text extraction. No account required &mdash; upload a file and get results in seconds.</p>
+
+                <div class="docs-steps">
+                    <div class="docs-step">
+                        <span class="docs-step-num">1</span>
+                        <div>
+                            <h4>Choose a tool</h4>
+                            <p>Select the conversion type from the tabs on the <a href="{{ url_for('index') }}">home page</a>: OCR, Image, Audio, Video, or Document.</p>
+                        </div>
+                    </div>
+                    <div class="docs-step">
+                        <span class="docs-step-num">2</span>
+                        <div>
+                            <h4>Upload your file</h4>
+                            <p>Drag and drop or click to browse. Files up to <strong>25 MB</strong> are accepted.</p>
+                        </div>
+                    </div>
+                    <div class="docs-step">
+                        <span class="docs-step-num">3</span>
+                        <div>
+                            <h4>Configure options</h4>
+                            <p>Pick an output format, quality level, or any tool-specific settings.</p>
+                        </div>
+                    </div>
+                    <div class="docs-step">
+                        <span class="docs-step-num">4</span>
+                        <div>
+                            <h4>Download the result</h4>
+                            <p>Once processing finishes, download your converted file or copy the extracted text.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- OCR -->
+            <section id="ocr" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                </div>
+                <h2>OCR & Text Extraction</h2>
+                <p>Extract text from scanned documents and images using Tesseract OCR.</p>
+
+                <h3>Supported Formats</h3>
+                <div class="docs-format-list">
+                    <span class="docs-format">PDF</span>
+                    <span class="docs-format">PNG</span>
+                    <span class="docs-format">JPG</span>
+                    <span class="docs-format">JPEG</span>
+                    <span class="docs-format">TIFF</span>
+                    <span class="docs-format">BMP</span>
+                </div>
+
+                <h3>Processing Modes</h3>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr><th>Mode</th><th>Description</th><th>Output</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>Text extraction</code></td><td>Extracts embedded text from digital PDFs</td><td>TXT, JSON</td></tr>
+                            <tr><td><code>PDF to OCR'd PDF</code></td><td>Runs OCR and produces a searchable PDF</td><td>PDF</td></tr>
+                            <tr><td><code>OCR + Text</code></td><td>Runs OCR and extracts text in one step</td><td>TXT, JSON, PDF</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="docs-callout">
+                    <div class="docs-callout-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    </div>
+                    <div>
+                        <strong>Tip:</strong> For scanned documents with no embedded text, use <em>OCR + Text</em> to get both a searchable PDF and a plain-text copy.
+                    </div>
+                </div>
+            </section>
+
+            <!-- Image -->
+            <section id="image" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                </div>
+                <h2>Image Conversion</h2>
+                <p>Convert between 200+ image formats with optional resize, rotation, and adjustments.</p>
+
+                <h3>Output Formats</h3>
+                <div class="docs-format-list">
+                    <span class="docs-format">PNG</span>
+                    <span class="docs-format">JPG</span>
+                    <span class="docs-format">WebP</span>
+                    <span class="docs-format">GIF</span>
+                    <span class="docs-format">TIFF</span>
+                    <span class="docs-format">BMP</span>
+                    <span class="docs-format">ICO</span>
+                    <span class="docs-format">PDF</span>
+                </div>
+
+                <h3>Options</h3>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr><th>Option</th><th>Description</th><th>Default</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Quality</td><td>Compression quality for lossy formats (JPG, WebP)</td><td>85%</td></tr>
+                            <tr><td>Resize</td><td>Set width, height (px), or scale (%)</td><td>Original size</td></tr>
+                            <tr><td>DPI</td><td>Dots per inch for print output</td><td>72</td></tr>
+                            <tr><td>Rotation</td><td>Rotate 90&deg;, 180&deg;, or 270&deg;</td><td>None</td></tr>
+                            <tr><td>Brightness / Contrast</td><td>Adjust from 0% to 200%</td><td>100%</td></tr>
+                            <tr><td>Grayscale</td><td>Convert to black-and-white</td><td>Off</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="docs-callout">
+                    <div class="docs-callout-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    </div>
+                    <div>
+                        <strong>Tip:</strong> Input supports RAW camera formats (NEF, CR2, ARW, DNG&hellip;), PSD, HEIC, AVIF, and many more via ImageMagick.
+                    </div>
+                </div>
+            </section>
+
+            <!-- Document -->
+            <section id="document" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <h2>Document Conversion</h2>
+                <p>Convert between document formats using Pandoc.</p>
+
+                <h3>Supported Input Formats</h3>
+                <div class="docs-format-list">
+                    <span class="docs-format">DOCX</span>
+                    <span class="docs-format">DOC</span>
+                    <span class="docs-format">MD</span>
+                    <span class="docs-format">HTML</span>
+                    <span class="docs-format">RTF</span>
+                    <span class="docs-format">CSV</span>
+                    <span class="docs-format">JSON</span>
+                    <span class="docs-format">EPUB</span>
+                    <span class="docs-format">ODT</span>
+                    <span class="docs-format">RST</span>
+                    <span class="docs-format">TXT</span>
+                    <span class="docs-format">XML</span>
+                </div>
+
+                <h3>Output Formats</h3>
+                <div class="docs-format-list">
+                    <span class="docs-format">PDF</span>
+                    <span class="docs-format">DOCX</span>
+                    <span class="docs-format">HTML</span>
+                    <span class="docs-format">TXT</span>
+                    <span class="docs-format">Markdown</span>
+                </div>
+            </section>
+
+            <!-- Audio -->
+            <section id="audio" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+                </div>
+                <h2>Audio Conversion</h2>
+                <p>Convert between audio formats or extract audio tracks from video files using FFmpeg.</p>
+
+                <h3>Output Formats</h3>
+                <div class="docs-format-list">
+                    <span class="docs-format">MP3</span>
+                    <span class="docs-format">WAV</span>
+                    <span class="docs-format">FLAC</span>
+                    <span class="docs-format">AAC</span>
+                    <span class="docs-format">OGG</span>
+                    <span class="docs-format">M4A</span>
+                    <span class="docs-format">OPUS</span>
+                </div>
+
+                <h3>Bitrate Options</h3>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr><th>Bitrate</th><th>Use Case</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>128 kbps</td><td>Smaller file size, acceptable quality for speech</td></tr>
+                            <tr><td>192 kbps</td><td>Good balance of quality and size (default)</td></tr>
+                            <tr><td>256 kbps</td><td>High quality for music</td></tr>
+                            <tr><td>320 kbps</td><td>Maximum quality for lossy formats</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="docs-callout">
+                    <div class="docs-callout-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    </div>
+                    <div>
+                        <strong>Tip:</strong> You can upload a video file (MP4, MKV, AVI&hellip;) and the audio tab will extract just the audio track.
+                    </div>
+                </div>
+            </section>
+
+            <!-- Video -->
+            <section id="video" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
+                </div>
+                <h2>Video Conversion</h2>
+                <p>Convert between video formats with quality control via FFmpeg.</p>
+
+                <h3>Output Formats</h3>
+                <div class="docs-format-list">
+                    <span class="docs-format">MP4</span>
+                    <span class="docs-format">WebM</span>
+                    <span class="docs-format">AVI</span>
+                    <span class="docs-format">MKV</span>
+                    <span class="docs-format">MOV</span>
+                    <span class="docs-format">GIF</span>
+                    <span class="docs-format">WMV</span>
+                    <span class="docs-format">FLV</span>
+                </div>
+
+                <h3>Quality Presets</h3>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr><th>Preset</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Low</td><td>Smallest file size, reduced resolution</td></tr>
+                            <tr><td>Medium</td><td>Balanced quality and file size (default)</td></tr>
+                            <tr><td>High</td><td>Best visual quality, larger file</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- API -->
+            <section id="api" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                </div>
+                <h2>REST API</h2>
+                <p>Integrate FileForge into your workflow with the REST API. All endpoints accept multipart form data.</p>
+
+                <h3>Create a Job</h3>
+                <div class="docs-code-block">
+                    <div class="docs-code-header">
+                        <span class="docs-code-method post">POST</span>
+                        <code>/api/jobs</code>
+                    </div>
+<pre class="docs-code"><code>curl -X POST {{ '{{' }}BASE_URL{{ '}}' }}/api/jobs \
+  -F "file=@document.pdf" \
+  -F "job_type=ocr" \
+  -F "mode=both" \
+  -F "ocr_engine=tesseract"</code></pre>
+                </div>
+
+                <div class="docs-code-block">
+                    <div class="docs-code-header">Response</div>
+<pre class="docs-code"><code>{
+  "job_id": "a1b2c3d4-...",
+  "status": "queued",
+  "result_url": "/api/jobs/a1b2c3d4-.../result"
+}</code></pre>
+                </div>
+
+                <h3>Check Job Status</h3>
+                <div class="docs-code-block">
+                    <div class="docs-code-header">
+                        <span class="docs-code-method get">GET</span>
+                        <code>/api/jobs/{job_id}</code>
+                    </div>
+<pre class="docs-code"><code>{
+  "id": "a1b2c3d4-...",
+  "status": "completed",
+  "filename": "document.pdf",
+  "progress": 100
+}</code></pre>
+                </div>
+
+                <h3>Get Result</h3>
+                <div class="docs-code-block">
+                    <div class="docs-code-header">
+                        <span class="docs-code-method get">GET</span>
+                        <code>/api/jobs/{job_id}/result</code>
+                    </div>
+                    <p class="docs-code-desc">Returns the full result JSON when the job is complete, or <code>202</code> while still processing.</p>
+                </div>
+
+                <h3>Download Output</h3>
+                <div class="docs-code-block">
+                    <div class="docs-code-header">
+                        <span class="docs-code-method get">GET</span>
+                        <code>/api/jobs/{job_id}/download/{format}</code>
+                    </div>
+                    <p class="docs-code-desc">Download the converted file. Format depends on job type:</p>
+                    <div class="docs-table-wrap">
+                        <table class="docs-table">
+                            <thead>
+                                <tr><th>Job Type</th><th>Available Formats</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>OCR</td><td><code>txt</code>, <code>json</code>, <code>pdf</code></td></tr>
+                                <tr><td>Image</td><td><code>image</code></td></tr>
+                                <tr><td>Document</td><td><code>document</code></td></tr>
+                                <tr><td>Audio</td><td><code>audio</code></td></tr>
+                                <tr><td>Video</td><td><code>video</code></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <h3>Job Type Parameters</h3>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr><th>Parameter</th><th>Job Types</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>file</code></td><td>All</td><td>The file to process (required)</td></tr>
+                            <tr><td><code>job_type</code></td><td>All</td><td><code>ocr</code>, <code>image</code>, <code>document</code>, <code>audio</code>, <code>video</code></td></tr>
+                            <tr><td><code>mode</code></td><td>OCR</td><td><code>text</code>, <code>ocr</code>, <code>both</code></td></tr>
+                            <tr><td><code>output_format</code></td><td>Image, Document, Audio, Video</td><td>Target format (e.g. <code>png</code>, <code>pdf</code>, <code>mp3</code>)</td></tr>
+                            <tr><td><code>quality</code></td><td>Image, Video</td><td>Quality level (1-100 for image, low/medium/high for video)</td></tr>
+                            <tr><td><code>bitrate</code></td><td>Audio</td><td><code>128</code>, <code>192</code>, <code>256</code>, <code>320</code></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Self-Hosting -->
+            <section id="self-hosting" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+                </div>
+                <h2>Self-Hosting</h2>
+                <p>Run FileForge on your own server with Docker.</p>
+
+                <h3>Quick Start (without Tika)</h3>
+                <div class="docs-code-block">
+<pre class="docs-code"><code>docker compose up -d</code></pre>
+                </div>
+
+                <h3>Full Stack (with Apache Tika)</h3>
+                <div class="docs-code-block">
+<pre class="docs-code"><code>docker compose -f docker-compose.full.yml up -d</code></pre>
+                </div>
+                <p>Apache Tika adds enhanced text extraction and metadata support for a wider range of document types.</p>
+
+                <h3>Environment Variables</h3>
+                <div class="docs-table-wrap">
+                    <table class="docs-table">
+                        <thead>
+                            <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td><code>MAX_FILE_MB</code></td><td>25</td><td>Maximum upload file size in megabytes</td></tr>
+                            <tr><td><code>TIKA_SERVER_URL</code></td><td>http://localhost:9998</td><td>Apache Tika server URL</td></tr>
+                            <tr><td><code>CLEANUP_TTL_HOURS</code></td><td>24</td><td>Hours before processed files are deleted</td></tr>
+                            <tr><td><code>CLEANUP_INTERVAL_MINUTES</code></td><td>30</td><td>How often the cleanup task runs</td></tr>
+                            <tr><td><code>SECRET_KEY</code></td><td><em>dev key</em></td><td>Flask secret key (change in production)</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Limits -->
+            <section id="limits" class="docs-section">
+                <div class="docs-section-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                </div>
+                <h2>Limits & Cleanup</h2>
+
+                <div class="docs-limits-grid">
+                    <div class="docs-limit-card">
+                        <div class="docs-limit-value">25 MB</div>
+                        <div class="docs-limit-label">Max file size</div>
+                        <p>Configurable via <code>MAX_FILE_MB</code></p>
+                    </div>
+                    <div class="docs-limit-card">
+                        <div class="docs-limit-value">24 hrs</div>
+                        <div class="docs-limit-label">File retention</div>
+                        <p>Processed files are automatically deleted</p>
+                    </div>
+                    <div class="docs-limit-card">
+                        <div class="docs-limit-value">2</div>
+                        <div class="docs-limit-label">Concurrent workers</div>
+                        <p>Jobs are queued and processed in order</p>
+                    </div>
+                </div>
+
+                <div class="docs-callout">
+                    <div class="docs-callout-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    </div>
+                    <div>
+                        <strong>Privacy:</strong> All uploaded files and results are automatically purged after the retention period. No data is shared with third parties.
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}

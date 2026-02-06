@@ -8,6 +8,7 @@ from flask import Flask, Response, flash, jsonify, redirect, render_template, re
 from werkzeug.utils import secure_filename
 
 from ocr_engine.audio_pipeline import process_audio_job
+from ocr_engine.cleanup import start_cleanup_thread
 from ocr_engine.config import Settings
 from ocr_engine.document_pipeline import process_document_job
 from ocr_engine.image_pipeline import process_image_job
@@ -24,6 +25,7 @@ def create_app():
     ensure_dirs(settings.data_dir, settings.upload_dir, settings.result_dir)
     job_store = JobStore(settings.db_path)
     executor = ThreadPoolExecutor(max_workers=2)
+    start_cleanup_thread(settings, job_store)
 
     @app.context_processor
     def inject_now():
@@ -268,6 +270,10 @@ def create_app():
             return send_file(video_path, as_attachment=True, download_name=download_name)
 
         return jsonify({"error": "unsupported format"}), 400
+
+    @app.route("/docs")
+    def docs():
+        return render_template("docs.html")
 
     @app.route("/about")
     def about():

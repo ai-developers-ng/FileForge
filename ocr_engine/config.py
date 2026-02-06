@@ -11,5 +11,7 @@ class Settings:
         self.db_path = os.path.join(self.data_dir, "jobs.db")
         self.tika_url = os.environ.get("TIKA_SERVER_URL", "http://localhost:9998")
         self.max_file_mb = int(os.environ.get("MAX_FILE_MB", "25"))
+        self.cleanup_ttl_hours = int(os.environ.get("CLEANUP_TTL_HOURS", "24"))
+        self.cleanup_interval_minutes = int(os.environ.get("CLEANUP_INTERVAL_MINUTES", "30"))
         # DEPRECATED: No longer used - mode selection is explicit (text/ocr/both)
         self.ocr_text_threshold = int(os.environ.get("OCR_TEXT_THRESHOLD", "50"))
