@@ -1,4 +1,47 @@
 // ============================================
+// CSRF Token
+// ============================================
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+
+// ============================================
+// SSE Helper - stream job progress with polling fallback
+// ============================================
+const streamJob = (jobId, onUpdate) => {
+  if (typeof EventSource !== "undefined") {
+    const es = new EventSource(`/api/jobs/${jobId}/stream`);
+    es.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      onUpdate(data);
+      if (data.status === "completed" || data.status === "failed") {
+        es.close();
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      const poll = async () => {
+        const response = await fetch(`/api/jobs/${jobId}`);
+        const job = await response.json();
+        onUpdate(job);
+        if (job.status !== "completed" && job.status !== "failed") {
+          setTimeout(poll, 2000);
+        }
+      };
+      poll();
+    };
+  } else {
+    const poll = async () => {
+      const response = await fetch(`/api/jobs/${jobId}`);
+      const job = await response.json();
+      onUpdate(job);
+      if (job.status !== "completed" && job.status !== "failed") {
+        setTimeout(poll, 2000);
+      }
+    };
+    poll();
+  }
+};
+
+// ============================================
 // Tab Switching
 // ============================================
 const tabs = document.querySelectorAll(".tab[data-tab]");
@@ -271,9 +314,7 @@ const updateOverallStatus = () => {
 };
 
 const pollJob = async (jobIndex, jobId, jobMode) => {
-  const poll = async () => {
-    const response = await fetch(`/api/jobs/${jobId}`);
-    const job = await response.json();
+  const onUpdate = (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
 
@@ -292,44 +333,76 @@ const pollJob = async (jobIndex, jobId, jobMode) => {
     updateOverallStatus();
 
     if (job.status === "completed" || job.status === "failed") {
-      if (activeJobs.length === 1) {
-        const lastCompleted = activeJobs.find((j) => j.status === "completed");
-        if (lastCompleted) {
-          setActionState(jobMode, lastCompleted.jobId, true);
-          try {
-            const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result`);
-            const result = await resultResponse.json();
-            resultText.value = result.final_text || "No text extracted.";
-          } catch {
-            resultText.value = "Could not fetch result.";
-          }
-        }
-      } else {
-        setActionState(jobMode, null, false);
-        const completedJobs = activeJobs.filter((j) => j.status === "completed" && j.jobId);
-        const allTexts = [];
-        for (const completedJob of completedJobs) {
-          try {
-            const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result`);
-            const result = await resultResponse.json();
-            if (result.final_text) {
-              allTexts.push(`--- ${completedJob.filename} ---\n${result.final_text}`);
+      (async () => {
+        if (activeJobs.length === 1) {
+          const lastCompleted = activeJobs.find((j) => j.status === "completed");
+          if (lastCompleted) {
+            setActionState(jobMode, lastCompleted.jobId, true);
+            try {
+              const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result`);
+              const result = await resultResponse.json();
+              resultText.value = result.final_text || "No text extracted.";
+            } catch {
+              resultText.value = "Could not fetch result.";
             }
-          } catch {
-            // Skip failed fetches
           }
+        } else {
+          setActionState(jobMode, null, false);
+          const completedJobs = activeJobs.filter((j) => j.status === "completed" && j.jobId);
+          const allTexts = [];
+          for (const completedJob of completedJobs) {
+            try {
+              const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result`);
+              const result = await resultResponse.json();
+              if (result.final_text) {
+                allTexts.push(`--- ${completedJob.filename} ---\n${result.final_text}`);
+              }
+            } catch {
+              // Skip failed fetches
+            }
+          }
+          resultText.value = allTexts.length > 0
+            ? allTexts.join("\n\n")
+            : "No text extracted from files.";
         }
-        resultText.value = allTexts.length > 0
-          ? allTexts.join("\n\n")
-          : "No text extracted from files.";
-      }
-      return;
+      })();
     }
-
-    setTimeout(poll, 2000);
   };
 
-  poll();
+  // Try SSE first, fallback to polling
+  if (typeof EventSource !== "undefined") {
+    const es = new EventSource(`/api/jobs/${jobId}/stream`);
+    es.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      onUpdate(data);
+      if (data.status === "completed" || data.status === "failed") {
+        es.close();
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      // Fallback to polling
+      const poll = async () => {
+        const response = await fetch(`/api/jobs/${jobId}`);
+        const job = await response.json();
+        onUpdate(job);
+        if (job.status !== "completed" && job.status !== "failed") {
+          setTimeout(poll, 2000);
+        }
+      };
+      poll();
+    };
+  } else {
+    const poll = async () => {
+      const response = await fetch(`/api/jobs/${jobId}`);
+      const job = await response.json();
+      onUpdate(job);
+      if (job.status !== "completed" && job.status !== "failed") {
+        setTimeout(poll, 2000);
+      }
+    };
+    poll();
+  }
 };
 
 const submitFiles = async () => {
@@ -352,12 +425,14 @@ const submitFiles = async () => {
     formData.set("mode", lastJobMode);
     formData.set("ocr_engine", "tesseract");
     formData.set("job_type", "ocr");
+    formData.set("lang", uploadForm?.querySelector("select[name='lang']")?.value || "eng");
 
     updateFilePillStatus(i, "Uploading...");
 
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
         body: formData,
       });
       const payload = await response.json();
@@ -478,17 +553,13 @@ const updateImageOverallStatus = () => {
   setImageProgress(calculateImageOverallProgress());
 };
 
-const pollImageJob = async (jobIndex, jobId) => {
-  const poll = async () => {
-    const response = await fetch(`/api/jobs/${jobId}`);
-    const job = await response.json();
+const pollImageJob = (jobIndex, jobId) => {
+  streamJob(jobId, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-
     activeImageJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeImageJobs[jobIndex].status = job.status;
     activeImageJobs[jobIndex].result = job;
-
     if (job.status === "completed") {
       updateImageFilePillStatus(jobIndex, "Done", jobId);
     } else if (job.status === "failed") {
@@ -496,17 +567,8 @@ const pollImageJob = async (jobIndex, jobId) => {
     } else {
       updateImageFilePillStatus(jobIndex, `${progress}%`);
     }
-
     updateImageOverallStatus();
-
-    if (job.status === "completed" || job.status === "failed") {
-      return;
-    }
-
-    setTimeout(poll, 2000);
-  };
-
-  poll();
+  });
 };
 
 const submitImageFiles = async () => {
@@ -541,6 +603,7 @@ const submitImageFiles = async () => {
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
         body: formData,
       });
       const payload = await response.json();
@@ -743,17 +806,13 @@ const updateDocumentOverallStatus = () => {
   setDocumentProgress(calculateDocumentOverallProgress());
 };
 
-const pollDocumentJob = async (jobIndex, jobId) => {
-  const poll = async () => {
-    const response = await fetch(`/api/jobs/${jobId}`);
-    const job = await response.json();
+const pollDocumentJob = (jobIndex, jobId) => {
+  streamJob(jobId, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-
     activeDocumentJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeDocumentJobs[jobIndex].status = job.status;
     activeDocumentJobs[jobIndex].result = job;
-
     if (job.status === "completed") {
       updateDocumentFilePillStatus(jobIndex, "Done", jobId);
     } else if (job.status === "failed") {
@@ -761,17 +820,8 @@ const pollDocumentJob = async (jobIndex, jobId) => {
     } else {
       updateDocumentFilePillStatus(jobIndex, `${progress}%`);
     }
-
     updateDocumentOverallStatus();
-
-    if (job.status === "completed" || job.status === "failed") {
-      return;
-    }
-
-    setTimeout(poll, 2000);
-  };
-
-  poll();
+  });
 };
 
 const submitDocumentFiles = async () => {
@@ -796,6 +846,7 @@ const submitDocumentFiles = async () => {
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
         body: formData,
       });
       const payload = await response.json();
@@ -916,17 +967,13 @@ const updateAudioOverallStatus = () => {
   setAudioProgress(calculateAudioOverallProgress());
 };
 
-const pollAudioJob = async (jobIndex, jobId) => {
-  const poll = async () => {
-    const response = await fetch(`/api/jobs/${jobId}`);
-    const job = await response.json();
+const pollAudioJob = (jobIndex, jobId) => {
+  streamJob(jobId, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-
     activeAudioJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeAudioJobs[jobIndex].status = job.status;
     activeAudioJobs[jobIndex].result = job;
-
     if (job.status === "completed") {
       updateAudioFilePillStatus(jobIndex, "Done", jobId);
     } else if (job.status === "failed") {
@@ -934,17 +981,8 @@ const pollAudioJob = async (jobIndex, jobId) => {
     } else {
       updateAudioFilePillStatus(jobIndex, `${progress}%`);
     }
-
     updateAudioOverallStatus();
-
-    if (job.status === "completed" || job.status === "failed") {
-      return;
-    }
-
-    setTimeout(poll, 2000);
-  };
-
-  poll();
+  });
 };
 
 const submitAudioFiles = async () => {
@@ -969,6 +1007,7 @@ const submitAudioFiles = async () => {
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
         body: formData,
       });
       const payload = await response.json();
@@ -1089,17 +1128,13 @@ const updateVideoOverallStatus = () => {
   setVideoProgress(calculateVideoOverallProgress());
 };
 
-const pollVideoJob = async (jobIndex, jobId) => {
-  const poll = async () => {
-    const response = await fetch(`/api/jobs/${jobId}`);
-    const job = await response.json();
+const pollVideoJob = (jobIndex, jobId) => {
+  streamJob(jobId, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-
     activeVideoJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeVideoJobs[jobIndex].status = job.status;
     activeVideoJobs[jobIndex].result = job;
-
     if (job.status === "completed") {
       updateVideoFilePillStatus(jobIndex, "Done", jobId);
     } else if (job.status === "failed") {
@@ -1107,17 +1142,8 @@ const pollVideoJob = async (jobIndex, jobId) => {
     } else {
       updateVideoFilePillStatus(jobIndex, `${progress}%`);
     }
-
     updateVideoOverallStatus();
-
-    if (job.status === "completed" || job.status === "failed") {
-      return;
-    }
-
-    setTimeout(poll, 2000);
-  };
-
-  poll();
+  });
 };
 
 const submitVideoFiles = async () => {
@@ -1142,6 +1168,7 @@ const submitVideoFiles = async () => {
     try {
       const response = await fetch("/api/jobs", {
         method: "POST",
+        headers: { "X-CSRFToken": csrfToken },
         body: formData,
       });
       const payload = await response.json();
@@ -1268,6 +1295,262 @@ videoUploadForm?.addEventListener("submit", async (event) => {
 });
 
 // ============================================
+// PDF Tools Tab Elements & State
+// ============================================
+const pdfDropzone = document.getElementById("pdfDropzone");
+const pdfFileInput = document.getElementById("pdfFileInput");
+const pdfFileList = document.getElementById("pdfFileList");
+const pdfUploadForm = document.getElementById("pdfUploadForm");
+const pdfStatusMessage = document.getElementById("pdfStatusMessage");
+const pdfResultFilename = document.getElementById("pdfResultFilename");
+const pdfResultStatus = document.getElementById("pdfResultStatus");
+const pdfProgressFill = document.getElementById("pdfProgressFill");
+const pdfProgressPercent = document.getElementById("pdfProgressPercent");
+const pdfPreviewArea = document.getElementById("pdfPreviewArea");
+const pdfModeInput = document.getElementById("pdfModeInput");
+const pdfDropzoneHint = document.getElementById("pdfDropzoneHint");
+const pdfToolGrid = document.getElementById("pdfToolGrid");
+
+let selectedPdfFiles = [];
+let currentPdfTool = "merge";
+
+// Tool configuration: hints, accept types, multi-file, options panel
+const pdfToolConfig = {
+  merge:        { hint: "Upload 2 or more PDF files to merge (Max 25MB each)", accept: ".pdf", multi: true, opts: null },
+  split:        { hint: "Upload a PDF file to split into individual pages", accept: ".pdf", multi: false, opts: null },
+  compress:     { hint: "Upload a PDF file to compress and reduce file size", accept: ".pdf", multi: false, opts: null },
+  rotate:       { hint: "Upload a PDF file to rotate all pages", accept: ".pdf", multi: false, opts: "opts-rotate" },
+  extract:      { hint: "Upload a PDF and specify page numbers to extract", accept: ".pdf", multi: false, opts: "opts-pages" },
+  delete:       { hint: "Upload a PDF and specify page numbers to remove", accept: ".pdf", multi: false, opts: "opts-pages" },
+  watermark:    { hint: "Upload a PDF to add a text watermark overlay", accept: ".pdf", multi: false, opts: "opts-watermark" },
+  page_numbers: { hint: "Upload a PDF to add page numbers", accept: ".pdf", multi: false, opts: "opts-page-numbers" },
+  protect:      { hint: "Upload a PDF to encrypt with a password", accept: ".pdf", multi: false, opts: "opts-password" },
+  unlock:       { hint: "Upload a password-protected PDF to decrypt", accept: ".pdf", multi: false, opts: "opts-password" },
+  to_images:    { hint: "Upload a PDF to convert each page to an image", accept: ".pdf", multi: false, opts: "opts-to-images" },
+  from_images:  { hint: "Upload images to combine into a single PDF (PNG, JPG, etc.)", accept: ".png,.jpg,.jpeg,.gif,.bmp,.tif,.tiff,.webp", multi: true, opts: null },
+  metadata:     { hint: "Upload a PDF to edit its metadata (title, author, etc.)", accept: ".pdf", multi: false, opts: "opts-metadata" },
+};
+
+const selectPdfTool = (tool) => {
+  currentPdfTool = tool;
+  const config = pdfToolConfig[tool];
+  if (!config) return;
+
+  // Update active button
+  pdfToolGrid?.querySelectorAll(".pdf-tool-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.tool === tool);
+  });
+
+  // Update hidden mode input
+  if (pdfModeInput) pdfModeInput.value = tool;
+
+  // Update dropzone hint and accept type
+  if (pdfDropzoneHint) pdfDropzoneHint.textContent = config.hint;
+  if (pdfFileInput) {
+    pdfFileInput.accept = config.accept;
+    pdfFileInput.multiple = config.multi;
+  }
+
+  // Show/hide option panels
+  document.querySelectorAll(".pdf-tool-options").forEach((el) => {
+    el.style.display = "none";
+  });
+  if (config.opts) {
+    const optsEl = document.getElementById(config.opts);
+    if (optsEl) optsEl.style.display = "";
+  }
+
+  // Update password label
+  if (tool === "protect") {
+    const label = document.getElementById("passwordLabel");
+    if (label) label.textContent = "Set Password";
+  } else if (tool === "unlock") {
+    const label = document.getElementById("passwordLabel");
+    if (label) label.textContent = "Enter Password";
+  }
+
+  // Clear selected files on tool change
+  selectedPdfFiles = [];
+  if (pdfFileList) pdfFileList.innerHTML = "";
+  setPdfStatus("Ready to process.");
+  setPdfResultMeta("Awaiting upload", "Idle");
+  setPdfProgress(0);
+  if (pdfPreviewArea) pdfPreviewArea.innerHTML = "<p>Processed PDF will be available for download.</p>";
+};
+
+// Attach tool selector event listeners
+pdfToolGrid?.querySelectorAll(".pdf-tool-btn").forEach((btn) => {
+  btn.addEventListener("click", () => selectPdfTool(btn.dataset.tool));
+});
+
+const setPdfStatus = (message) => {
+  if (pdfStatusMessage) pdfStatusMessage.textContent = message;
+};
+
+const setPdfResultMeta = (name, status) => {
+  if (pdfResultFilename) pdfResultFilename.textContent = name;
+  if (pdfResultStatus) pdfResultStatus.textContent = status;
+};
+
+const setPdfProgress = (value) => {
+  const safeValue = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
+  if (pdfProgressFill) pdfProgressFill.style.width = `${safeValue}%`;
+  if (pdfProgressPercent) pdfProgressPercent.textContent = `${Math.round(safeValue)}%`;
+};
+
+const renderPdfFiles = (files) => {
+  if (!pdfFileList) return;
+  pdfFileList.innerHTML = "";
+  [...files].forEach((file, index) => {
+    const pill = document.createElement("div");
+    pill.className = "file-pill";
+    pill.dataset.fileIndex = index;
+    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
+      file.size / 1024
+    )} KB</span>`;
+    pdfFileList.appendChild(pill);
+  });
+};
+
+const handlePdfFiles = (files) => {
+  if (!files || files.length === 0) return;
+  selectedPdfFiles = [...files];
+  renderPdfFiles(files);
+};
+
+const pollPdfJob = (jobId) => {
+  streamJob(jobId, (job) => {
+    const progress =
+      typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
+    setPdfProgress(progress);
+    if (job.status === "completed") {
+      setPdfStatus("Processing complete!");
+      setPdfResultMeta("Done", "Completed");
+      setPdfProgress(100);
+      if (pdfPreviewArea) {
+        pdfPreviewArea.innerHTML = `<a href="/api/jobs/${jobId}/download/pdf" class="primary btn" style="display:inline-block;margin-top:10px;">Download Result</a>`;
+      }
+    } else if (job.status === "failed") {
+      setPdfStatus(`Failed: ${job.error || "unknown error"}`);
+      setPdfResultMeta("Failed", "Error");
+      setPdfProgress(100);
+    } else {
+      setPdfStatus(`Processing... ${progress}%`);
+    }
+  });
+};
+
+const submitPdfFiles = async () => {
+  if (!selectedPdfFiles.length) {
+    setPdfStatus("Please choose file(s) first.");
+    return;
+  }
+
+  const pdfMode = currentPdfTool;
+
+  if (pdfMode === "merge" && selectedPdfFiles.length < 2) {
+    setPdfStatus("Please select at least 2 PDFs to merge.");
+    return;
+  }
+
+  setPdfProgress(0);
+  setPdfStatus("Uploading...");
+  setPdfResultMeta("Uploading...", "Starting");
+  if (pdfPreviewArea) pdfPreviewArea.innerHTML = "<p>Processing...</p>";
+
+  const formData = new FormData();
+  for (const file of selectedPdfFiles) {
+    formData.append("files", file);
+  }
+  formData.set("pdf_mode", pdfMode);
+
+  // Append tool-specific options from the form
+  if (pdfMode === "rotate") {
+    const deg = pdfUploadForm?.querySelector("input[name='rotate_degrees']:checked")?.value || "90";
+    formData.set("rotate_degrees", deg);
+  } else if (pdfMode === "extract" || pdfMode === "delete") {
+    formData.set("page_range", pdfUploadForm?.querySelector("input[name='page_range']")?.value || "1");
+  } else if (pdfMode === "watermark") {
+    formData.set("watermark_text", pdfUploadForm?.querySelector("input[name='watermark_text']")?.value || "WATERMARK");
+    formData.set("watermark_opacity", pdfUploadForm?.querySelector("input[name='watermark_opacity']")?.value || "0.3");
+    formData.set("watermark_font_size", pdfUploadForm?.querySelector("input[name='watermark_font_size']")?.value || "60");
+    formData.set("watermark_rotation", pdfUploadForm?.querySelector("input[name='watermark_rotation']")?.value || "45");
+  } else if (pdfMode === "protect" || pdfMode === "unlock") {
+    formData.set("password", pdfUploadForm?.querySelector("input[name='password']")?.value || "");
+  } else if (pdfMode === "to_images") {
+    formData.set("image_format", pdfUploadForm?.querySelector("select[name='image_format']")?.value || "png");
+    formData.set("dpi", pdfUploadForm?.querySelector("select[name='dpi']")?.value || "200");
+  } else if (pdfMode === "page_numbers") {
+    formData.set("number_position", pdfUploadForm?.querySelector("select[name='number_position']")?.value || "bottom-center");
+    formData.set("start_number", pdfUploadForm?.querySelector("input[name='start_number']")?.value || "1");
+  } else if (pdfMode === "metadata") {
+    formData.set("meta_title", pdfUploadForm?.querySelector("input[name='meta_title']")?.value || "");
+    formData.set("meta_author", pdfUploadForm?.querySelector("input[name='meta_author']")?.value || "");
+    formData.set("meta_subject", pdfUploadForm?.querySelector("input[name='meta_subject']")?.value || "");
+    formData.set("meta_keywords", pdfUploadForm?.querySelector("input[name='meta_keywords']")?.value || "");
+  }
+
+  try {
+    const response = await fetch("/api/pdf-jobs", {
+      method: "POST",
+      headers: { "X-CSRFToken": csrfToken },
+      body: formData,
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      setPdfStatus(`Error: ${payload.error || "Upload failed"}`);
+      setPdfResultMeta("Failed", "Error");
+      return;
+    }
+
+    setPdfStatus("Processing...");
+    setPdfResultMeta("Processing...", "Running");
+    pollPdfJob(payload.job_id);
+  } catch (err) {
+    setPdfStatus(`Error: ${err.message}`);
+    setPdfResultMeta("Failed", "Error");
+  }
+};
+
+pdfDropzone?.addEventListener("dragover", (event) => {
+  event.preventDefault();
+  pdfDropzone.classList.add("is-dragging");
+});
+
+pdfDropzone?.addEventListener("dragleave", () => {
+  pdfDropzone.classList.remove("is-dragging");
+});
+
+pdfDropzone?.addEventListener("drop", (event) => {
+  event.preventDefault();
+  pdfDropzone.classList.remove("is-dragging");
+  handlePdfFiles(event.dataTransfer.files);
+});
+
+pdfFileInput?.addEventListener("change", (event) => {
+  handlePdfFiles(event.target.files);
+  event.target.value = "";
+});
+
+pdfUploadForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await submitPdfFiles();
+});
+
+// ============================================
+// Dark Mode Toggle
+// ============================================
+const themeToggle = document.getElementById("themeToggle");
+
+themeToggle?.addEventListener("click", () => {
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const next = isDark ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  localStorage.setItem("theme", next);
+});
+
+// ============================================
 // Mobile Menu Toggle
 // ============================================
 const mobileMenuToggle = document.querySelector(".mobile-menu-toggle");
@@ -1307,3 +1590,4 @@ setImageProgress(0);
 setDocumentProgress(0);
 setAudioProgress(0);
 setVideoProgress(0);
+setPdfProgress(0);

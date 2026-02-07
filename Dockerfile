@@ -11,6 +11,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Tesseract OCR
     tesseract-ocr \
     tesseract-ocr-eng \
+    tesseract-ocr-fra \
+    tesseract-ocr-deu \
+    tesseract-ocr-spa \
+    tesseract-ocr-ita \
+    tesseract-ocr-por \
+    tesseract-ocr-nld \
+    tesseract-ocr-rus \
+    tesseract-ocr-chi-sim \
+    tesseract-ocr-chi-tra \
+    tesseract-ocr-jpn \
+    tesseract-ocr-kor \
+    tesseract-ocr-ara \
+    tesseract-ocr-hin \
+    tesseract-ocr-tur \
     # ImageMagick
     imagemagick \
     libmagickwand-dev \
@@ -27,6 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Build tools for Python packages
     gcc \
     libffi-dev \
+    # Magic byte detection
+    libmagic1 \
     # For health check
     curl \
     # Clean up

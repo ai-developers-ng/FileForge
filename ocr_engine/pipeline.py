@@ -44,6 +44,7 @@ def process_job(job_id, file_path, options, settings, job_store):
     """
     mode = options.get("mode", "text")
     ocr_engine = options.get("ocr_engine", "tesseract")
+    lang = options.get("lang", "eng")
     
     logger.info(f"Processing job {job_id}: file={os.path.basename(file_path)}, "
                f"mode={mode}, ocr_engine={ocr_engine}")
@@ -118,7 +119,7 @@ def process_job(job_id, file_path, options, settings, job_store):
                 total_pages = len(ocr_images)
                 for idx, image in enumerate(ocr_images, start=1):
                     logger.info(f"OCR processing page {idx}/{len(ocr_images)}")
-                    ocr_text = _run_ocr_engine(image, ocr_engine, result)
+                    ocr_text = _run_ocr_engine(image, ocr_engine, result, lang=lang)
                     page_detail = ocr_text.get("detail", {}) or {}
                     page_pdf_bytes = page_detail.get("tesseract_pdf")
                     safe_detail = dict(page_detail)
@@ -186,23 +187,24 @@ def process_job(job_id, file_path, options, settings, job_store):
         )
 
 
-def _run_ocr_engine(image, engine, result):
+def _run_ocr_engine(image, engine, result, lang="eng"):
     """Run OCR engine on an image with error handling and logging.
-    
+
     Args:
         image: PIL Image object or numpy array
         engine: OCR engine name ('tesseract' only)
         result: Result dictionary to append errors to
-        
+        lang: Tesseract language code
+
     Returns:
         Dictionary with 'text', 'engine', and 'detail' keys
     """
     try:
-        logger.info(f"Running OCR with engine: {engine}")
-        
+        logger.info(f"Running OCR with engine: {engine}, lang: {lang}")
+
         if engine != "tesseract":
             raise ValueError(f"Unsupported OCR engine: {engine}")
-        ocr_result = run_tesseract(image)
+        ocr_result = run_tesseract(image, lang=lang)
         
         result_dict = ocr_result.__dict__
         logger.info(f"OCR completed. Engine: {engine}, Text length: {len(result_dict['text'])}, "
