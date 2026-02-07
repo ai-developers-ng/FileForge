@@ -75,5 +75,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5001/ || exit 1
 
 # Run with gunicorn for production
-# Optimized for 8GB RAM / 2 vCPU VPS
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "--threads", "4", "--timeout", "300", "--max-requests", "1000", "--max-requests-jitter", "100", "app:app"]
+# Optimized for 8GB RAM / 2 vCPU VPS - single worker with more threads
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--threads", "8", "--timeout", "300", "--max-requests", "1000", "--max-requests-jitter", "100", "--worker-class", "gthread", "app:app"]
