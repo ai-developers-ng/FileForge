@@ -20,29 +20,30 @@ def _load_tesseract():
     return pytesseract
 
 
-def run_tesseract(image):
+def run_tesseract(image, lang="eng"):
     """Run Tesseract OCR on an image.
-    
+
     Args:
         image: PIL Image object
-        
+        lang: Tesseract language code (default: eng)
+
     Returns:
         OcrResult with extracted text
     """
     pytesseract = _load_tesseract()
-    
+
     # Get text and data for confidence scores
-    text = pytesseract.image_to_string(image)
+    text = pytesseract.image_to_string(image, lang=lang)
     pdf_bytes = None
     try:
         # Generate searchable PDF with coordinates for better text selection.
-        pdf_bytes = pytesseract.image_to_pdf_or_hocr(image, extension="pdf")
+        pdf_bytes = pytesseract.image_to_pdf_or_hocr(image, extension="pdf", lang=lang)
     except Exception:
         pdf_bytes = None
-    
+
     # Get detailed OCR data for confidence metrics
     try:
-        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
+        data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT, lang=lang)
         confidences = [conf for conf in data['conf'] if conf != -1]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
     except Exception:

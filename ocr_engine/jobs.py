@@ -1,7 +1,7 @@
 import json
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 class JobStore:
@@ -86,7 +86,7 @@ class JobStore:
                 conn.execute("pragma user_version = 7;")
 
     def create_job(self, job_id, filename, options):
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
@@ -97,7 +97,7 @@ class JobStore:
             )
 
     def update_job(self, job_id, **fields):
-        fields["updated_at"] = datetime.utcnow().isoformat()
+        fields["updated_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
         keys = ", ".join(f"{key}=?" for key in fields.keys())
         values = list(fields.values()) + [job_id]
         with self._lock, self._connect() as conn:
@@ -149,8 +149,28 @@ class JobStore:
             paths.extend(p for p in row[1:] if p)
         return [r[0] for r in rows], paths
 
+    def list_recent_jobs(self, limit=50):
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "select id, filename, status, created_at, updated_at, progress, options "
+                "from jobs order by created_at desc limit ?",
+                (limit,),
+            ).fetchall()
+        return [
+            {
+                "id": row[0],
+                "filename": row[1],
+                "status": row[2],
+                "created_at": row[3],
+                "updated_at": row[4],
+                "progress": row[5] if row[5] is not None else 0,
+                "options": json.loads(row[6]) if row[6] else {},
+            }
+            for row in rows
+        ]
+
     def save_contact_submission(self, name, email, subject, message):
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         with self._lock, self._connect() as conn:
             conn.execute(
                 """

@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+
+{% block title %}Job History | FileForge{% endblock %}
+{% block meta_description %}View your recent file conversion and OCR processing jobs.{% endblock %}
+
+{% block content %}
+<div class="static-page">
+    <h1>Job History</h1>
+    <p class="page-subtitle">Recent processing jobs (last 50)</p>
+
+    {% if jobs %}
+    <div class="history-table-wrap">
+        <table class="docs-table history-table">
+            <thead>
+                <tr>
+                    <th>File</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Progress</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td class="history-filename">{{ job.filename }}</td>
+                    <td>
+                        <span class="format-badge">{{ job.options.get('job_type', 'ocr') | upper }}</span>
+                    </td>
+                    <td>
+                        <span class="history-status history-status--{{ job.status }}">{{ job.status }}</span>
+                    </td>
+                    <td>{{ job.progress }}%</td>
+                    <td class="history-date">{{ job.created_at[:19].replace('T', ' ') }}</td>
+                    <td>
+                        {% if job.status == 'completed' %}
+                            <a href="/results/{{ job.id }}" class="history-action">View</a>
+                        {% else %}
+                            &mdash;
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No jobs found. Upload a file to get started.</p>
+    {% endif %}
+</div>
+{% endblock %}

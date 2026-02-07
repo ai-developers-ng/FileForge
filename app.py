@@ -1,10 +1,15 @@
 import json
 import os
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import UTC, datetime
 
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask_compress import Compress
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from flask_wtf.csrf import CSRFProtect
 from werkzeug.utils import secure_filename
 
 from ocr_engine.audio_pipeline import process_audio_job
@@ -13,23 +18,78 @@ from ocr_engine.config import Settings
 from ocr_engine.document_pipeline import process_document_job
 from ocr_engine.image_pipeline import process_image_job
 from ocr_engine.jobs import JobStore
+from ocr_engine.pdf_pipeline import process_pdf_job
 from ocr_engine.pipeline import process_job
 from ocr_engine.storage import ensure_dirs
 from ocr_engine.video_pipeline import process_video_job
 
 
+MIME_TO_EXT = {
+    "application/pdf": {".pdf"},
+    "image/png": {".png"},
+    "image/jpeg": {".jpg", ".jpeg"},
+    "image/gif": {".gif"},
+    "image/bmp": {".bmp"},
+    "image/tiff": {".tif", ".tiff"},
+    "image/webp": {".webp"},
+    "image/svg+xml": {".svg", ".svgz"},
+    "image/x-icon": {".ico"},
+    "audio/mpeg": {".mp3", ".mp2"},
+    "audio/wav": {".wav"},
+    "audio/x-wav": {".wav"},
+    "audio/flac": {".flac"},
+    "audio/ogg": {".ogg", ".oga", ".opus"},
+    "audio/aac": {".aac"},
+    "audio/mp4": {".m4a", ".m4b"},
+    "video/mp4": {".mp4", ".m4v"},
+    "video/x-matroska": {".mkv"},
+    "video/webm": {".webm"},
+    "video/x-msvideo": {".avi"},
+    "video/quicktime": {".mov"},
+    "text/html": {".html", ".htm"},
+    "text/plain": {".txt", ".md", ".csv", ".tsv", ".rst"},
+    "text/csv": {".csv"},
+    "text/xml": {".xml", ".docbook"},
+    "application/json": {".json"},
+    "application/epub+zip": {".epub"},
+    "application/rtf": {".rtf"},
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {".docx"},
+    "application/vnd.oasis.opendocument.text": {".odt"},
+}
+
+
+def _validate_magic(file_path, ext):
+    """Validate file content matches its extension using magic bytes.
+    Returns True if valid or if magic is unavailable, False if mismatch."""
+    try:
+        import magic
+        detected_mime = magic.from_file(file_path, mime=True)
+    except (ImportError, Exception):
+        return True  # Skip validation if python-magic not available
+
+    allowed_exts = MIME_TO_EXT.get(detected_mime)
+    if allowed_exts is None:
+        return True  # Unknown MIME type, allow
+    return ext in allowed_exts
+
+
 def create_app():
     app = Flask(__name__)
     app.secret_key = os.environ.get("SECRET_KEY", "fileforge-dev-key-change-in-production")
+    if os.environ.get("FLASK_ENV") == "production" and app.secret_key == "fileforge-dev-key-change-in-production":
+        raise RuntimeError("SECRET_KEY must be set in production. Set the SECRET_KEY environment variable.")
+    limiter = Limiter(get_remote_address, app=app, storage_uri="memory://", default_limits=[])
+    csrf = CSRFProtect(app)
+    compress = Compress(app)
     settings = Settings()
     ensure_dirs(settings.data_dir, settings.upload_dir, settings.result_dir)
     job_store = JobStore(settings.db_path)
-    executor = ThreadPoolExecutor(max_workers=2)
+    executor = ThreadPoolExecutor(max_workers=settings.worker_count)
     start_cleanup_thread(settings, job_store)
 
     @app.context_processor
     def inject_now():
-        return {"now": datetime.utcnow()}
+        return {"now": datetime.now(UTC)}
     ocr_ext = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
     # ImageMagick supported formats (via Wand)
     image_ext = {
@@ -80,7 +140,12 @@ def create_app():
             return redirect(url_for("index"))
         return render_template("result.html", job=job)
 
+    @app.errorhandler(429)
+    def ratelimit_handler(e):
+        return jsonify({"error": "rate limit exceeded", "message": str(e.description)}), 429
+
     @app.route("/api/jobs", methods=["POST"])
+    @limiter.limit("20/minute")
     def create_job():
         if "file" not in request.files:
             return jsonify({"error": "file is required"}), 400
@@ -120,6 +185,10 @@ def create_app():
         job_id = str(uuid.uuid4())
         upload_path = os.path.join(settings.upload_dir, f"{job_id}-{filename}")
         file.save(upload_path)
+
+        if not _validate_magic(upload_path, ext):
+            os.remove(upload_path)
+            return jsonify({"error": "file content does not match its extension"}), 400
 
         if job_type == "image":
             options = {
@@ -165,6 +234,7 @@ def create_app():
                 "job_type": "ocr",
                 "mode": request.form.get("mode", "text"),
                 "ocr_engine": request.form.get("ocr_engine", "tesseract"),
+                "lang": request.form.get("lang", "eng"),
             }
             job_store.create_job(job_id, filename, options)
             executor.submit(process_job, job_id, upload_path, options, settings, job_store)
@@ -177,12 +247,117 @@ def create_app():
             }
         )
 
+    @app.route("/api/pdf-jobs", methods=["POST"])
+    @limiter.limit("20/minute")
+    def create_pdf_job():
+        files = request.files.getlist("files")
+        if not files or len(files) == 0:
+            return jsonify({"error": "at least one file is required"}), 400
+
+        pdf_mode = request.form.get("pdf_mode", "merge")
+        max_bytes = settings.max_file_mb * 1024 * 1024
+
+        # Images-to-PDF accepts image files; everything else requires PDFs
+        image_mode = pdf_mode == "from_images"
+        allowed_image_exts = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tif", ".tiff", ".webp"}
+
+        saved_paths = []
+        job_id = str(uuid.uuid4())
+        for file in files:
+            if file.filename == "":
+                continue
+            filename = secure_filename(file.filename)
+            ext = os.path.splitext(filename)[1].lower()
+            if image_mode:
+                if ext not in allowed_image_exts:
+                    for p in saved_paths:
+                        os.remove(p)
+                    return jsonify({"error": "only image files (PNG, JPG, GIF, BMP, TIFF, WebP) are accepted for this tool"}), 400
+            else:
+                if ext != ".pdf":
+                    for p in saved_paths:
+                        os.remove(p)
+                    return jsonify({"error": "only PDF files are accepted"}), 400
+            file.seek(0, os.SEEK_END)
+            if file.tell() > max_bytes:
+                for p in saved_paths:
+                    os.remove(p)
+                return jsonify({"error": f"file exceeds {settings.max_file_mb} MB"}), 400
+            file.seek(0)
+            path = os.path.join(settings.upload_dir, f"{job_id}-{filename}")
+            file.save(path)
+            saved_paths.append(path)
+
+        if not saved_paths:
+            return jsonify({"error": "no valid files uploaded"}), 400
+
+        if pdf_mode == "merge" and len(saved_paths) < 2:
+            for p in saved_paths:
+                os.remove(p)
+            return jsonify({"error": "merge requires at least 2 PDF files"}), 400
+
+        options = {"job_type": "pdf", "pdf_mode": pdf_mode}
+
+        # Pass tool-specific options
+        if pdf_mode == "rotate":
+            options["rotate_degrees"] = request.form.get("rotate_degrees", "90")
+        elif pdf_mode in ("extract", "delete"):
+            options["page_range"] = request.form.get("page_range", "1")
+        elif pdf_mode == "watermark":
+            options["watermark_text"] = request.form.get("watermark_text", "WATERMARK")
+            options["watermark_opacity"] = request.form.get("watermark_opacity", "0.3")
+            options["watermark_font_size"] = request.form.get("watermark_font_size", "60")
+            options["watermark_rotation"] = request.form.get("watermark_rotation", "45")
+        elif pdf_mode in ("protect", "unlock"):
+            options["password"] = request.form.get("password", "")
+        elif pdf_mode == "to_images":
+            options["image_format"] = request.form.get("image_format", "png")
+            options["dpi"] = request.form.get("dpi", "200")
+        elif pdf_mode == "page_numbers":
+            options["number_position"] = request.form.get("number_position", "bottom-center")
+            options["start_number"] = request.form.get("start_number", "1")
+        elif pdf_mode == "metadata":
+            options["meta_title"] = request.form.get("meta_title", "")
+            options["meta_author"] = request.form.get("meta_author", "")
+            options["meta_subject"] = request.form.get("meta_subject", "")
+            options["meta_keywords"] = request.form.get("meta_keywords", "")
+
+        first_filename = secure_filename(files[0].filename)
+        job_store.create_job(job_id, first_filename, options)
+        executor.submit(process_pdf_job, job_id, saved_paths, options, settings, job_store)
+
+        return jsonify({"job_id": job_id, "status": "queued"})
+
     @app.route("/api/jobs/<job_id>", methods=["GET"])
     def get_job(job_id):
         job = job_store.get_job(job_id)
         if not job:
             return jsonify({"error": "job not found"}), 404
         return jsonify(job)
+
+    @app.route("/api/jobs/<job_id>/stream", methods=["GET"])
+    def stream_job(job_id):
+        @compress.exempt
+        def generate():
+            while True:
+                job = job_store.get_job(job_id)
+                if not job:
+                    yield f"data: {json.dumps({'error': 'job not found'})}\n\n"
+                    return
+                payload = {
+                    "status": job["status"],
+                    "progress": job.get("progress", 0),
+                    "error": job.get("error"),
+                }
+                yield f"data: {json.dumps(payload)}\n\n"
+                if job["status"] in ("completed", "failed"):
+                    return
+                time.sleep(1)
+
+        return Response(generate(), mimetype="text/event-stream", headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        })
 
     @app.route("/api/jobs/<job_id>/result", methods=["GET"])
     def get_job_result(job_id):
@@ -218,7 +393,10 @@ def create_app():
 
         if fmt == "pdf":
             if job.get("pdf_path") and os.path.exists(job["pdf_path"]):
-                return send_file(job["pdf_path"], as_attachment=True, download_name=f"{base_name}.pdf")
+                pdf_path = job["pdf_path"]
+                if pdf_path.endswith(".zip"):
+                    return send_file(pdf_path, as_attachment=True, download_name=f"{original_name}_split.zip")
+                return send_file(pdf_path, as_attachment=True, download_name=f"{base_name}.pdf")
             return jsonify({"error": "PDF not available for this processing mode"}), 404
 
         if fmt == "image":
@@ -271,6 +449,11 @@ def create_app():
 
         return jsonify({"error": "unsupported format"}), 400
 
+    @app.route("/history")
+    def history():
+        jobs = job_store.list_recent_jobs(limit=50)
+        return render_template("history.html", jobs=jobs)
+
     @app.route("/docs")
     def docs():
         return render_template("docs.html")
@@ -282,6 +465,10 @@ def create_app():
     @app.route("/contact", methods=["GET", "POST"])
     def contact():
         if request.method == "POST":
+            if request.form.get("website"):
+                flash("Thank you for your message! We'll get back to you soon.", "success")
+                return redirect(url_for("contact"))
+
             name = request.form.get("name", "").strip()
             email = request.form.get("email", "").strip()
             subject = request.form.get("subject", "").strip()

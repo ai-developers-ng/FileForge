@@ -2,13 +2,13 @@ import glob
 import logging
 import os
 import threading
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 
 def _run_cleanup(settings, job_store):
-    cutoff = (datetime.utcnow() - timedelta(hours=settings.cleanup_ttl_hours)).isoformat()
+    cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=settings.cleanup_ttl_hours)).isoformat()
     job_ids, db_paths = job_store.delete_expired_jobs(cutoff)
 
     removed = 0
