@@ -40,8 +40,10 @@ def compress_pdf(path, output_path):
     reader = PdfReader(path)
     writer = PdfWriter()
     for page in reader.pages:
-        page.compress_content_streams()
         writer.add_page(page)
+    # Compress after all pages are added
+    for page in writer.pages:
+        page.compress_content_streams()
     writer.compress_identical_objects(remove_identicals=True, remove_orphans=True)
     with open(output_path, "wb") as f:
         writer.write(f)

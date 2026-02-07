@@ -28,8 +28,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # ImageMagick
     imagemagick \
     libmagickwand-dev \
-    # Pandoc + LaTeX for PDF generation
-    pandoc \
+    # LaTeX for PDF generation (without old pandoc)
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-fonts-recommended \
@@ -43,11 +42,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     # Magic byte detection
     libmagic1 \
+    # For downloading pandoc
+    wget \
     # For health check
     curl \
-    # Clean up
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install newer Pandoc from GitHub (compatible with pypandoc 1.13)
+RUN wget -q https://github.com/jgm/pandoc/releases/download/3.1.11/pandoc-3.1.11-1-amd64.deb \
+    && dpkg -i pandoc-3.1.11-1-amd64.deb \
+    && rm pandoc-3.1.11-1-amd64.deb \
+    && apt-get clean
 
 # Configure ImageMagick policy to allow PDF operations
 RUN sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml || true
