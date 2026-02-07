@@ -25,9 +25,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ara \
     tesseract-ocr-hin \
     tesseract-ocr-tur \
-    # ImageMagick
+    # ImageMagick + Ghostscript (required for PDF/PS/EPS support)
     imagemagick \
     libmagickwand-dev \
+    ghostscript \
     # LaTeX for PDF generation (without old pandoc)
     texlive-latex-base \
     texlive-latex-recommended \
