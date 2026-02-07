@@ -1,6 +1,5 @@
 version: '3.8'
 
-# Full stack with Apache Tika server for enhanced text extraction
 services:
   ocr-engine:
     build: .
@@ -13,13 +12,9 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - FLASK_ENV=production
       - MAX_FILE_MB=${MAX_FILE_MB:-25}
-      - TIKA_SERVER_URL=http://tika:9998
       - CLEANUP_TTL_HOURS=${CLEANUP_TTL_HOURS:-24}
       - CLEANUP_INTERVAL_MINUTES=${CLEANUP_INTERVAL_MINUTES:-30}
       - WORKER_COUNT=${WORKER_COUNT:-2}
-    depends_on:
-      tika:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/"]
@@ -27,19 +22,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
-
-  tika:
-    image: apache/tika:latest
-    container_name: tika-server
-    ports:
-      - "9998:9998"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /tika HTTP/1.0\\r\\n\\r\\n\" > /dev/tcp/localhost/9998'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
 
 volumes:
   ocr-data:
