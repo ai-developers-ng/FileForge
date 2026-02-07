@@ -251,22 +251,22 @@ const handleFiles = (files) => {
   renderFiles(files);
 };
 
-const setActionState = (mode, jobId, ready) => {
+const setActionState = (mode, jobId, accessToken, ready) => {
   if (!downloadTxt || !downloadJson || !downloadPdf || !copyText) return;
   const available = getAvailabilityForMode(mode);
   const enable = (action, isAvailable, setter) => {
-    const isReady = Boolean(ready && jobId && isAvailable);
+    const isReady = Boolean(ready && jobId && accessToken && isAvailable);
     setter(isReady, isAvailable);
   };
 
   enable("txt", available.txt, (isReady) => {
-    downloadTxt.href = isReady ? `/api/jobs/${jobId}/download/txt` : "#";
+    downloadTxt.href = isReady ? `/api/jobs/${jobId}/download/txt?token=${encodeURIComponent(accessToken)}` : "#";
     downloadTxt.setAttribute("aria-disabled", isReady ? "false" : "true");
     downloadTxt.title = isReady ? "Download TXT" : getDisabledReason(mode, "txt", false);
   });
 
   enable("json", available.json, (isReady) => {
-    downloadJson.href = isReady ? `/api/jobs/${jobId}/download/json` : "#";
+    downloadJson.href = isReady ? `/api/jobs/${jobId}/download/json?token=${encodeURIComponent(accessToken)}` : "#";
     downloadJson.setAttribute("aria-disabled", isReady ? "false" : "true");
     downloadJson.title = isReady
       ? "Download JSON"
@@ -274,7 +274,7 @@ const setActionState = (mode, jobId, ready) => {
   });
 
   enable("pdf", available.pdf, (isReady) => {
-    downloadPdf.href = isReady ? `/api/jobs/${jobId}/download/pdf` : "#";
+    downloadPdf.href = isReady ? `/api/jobs/${jobId}/download/pdf?token=${encodeURIComponent(accessToken)}` : "#";
     downloadPdf.setAttribute("aria-disabled", isReady ? "false" : "true");
     downloadPdf.title = isReady ? "Download PDF" : getDisabledReason(mode, "pdf", false);
   });

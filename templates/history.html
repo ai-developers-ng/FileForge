@@ -35,7 +35,7 @@
                     <td class="history-date">{{ job.created_at[:19].replace('T', ' ') }}</td>
                     <td>
                         {% if job.status == 'completed' %}
-                            <a href="/results/{{ job.id }}" class="history-action">View</a>
+                            <a href="/results/{{ job.id }}?token={{ job.token }}" class="history-action">View</a>
                         {% else %}
                             &mdash;
                         {% endif %}

@@ -48,9 +48,9 @@
         <div class="result-actions">
             <a class="ghost btn" href="{{ url_for('index') }}">Back to Home</a>
             {% if job.status == "completed" %}
-            <a class="primary btn" href="/api/jobs/{{ job.id }}/download/txt">Download TXT</a>
-            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json">Download JSON</a>
-            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/pdf">Download PDF</a>
+            <a class="primary btn" href="/api/jobs/{{ job.id }}/download/txt?token={{ token }}">Download TXT</a>
+            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON</a>
+            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/pdf?token={{ token }}">Download PDF</a>
             {% endif %}
         </div>
     </div>
