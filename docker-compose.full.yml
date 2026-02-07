@@ -17,6 +17,12 @@ services:
       - CLEANUP_TTL_HOURS=${CLEANUP_TTL_HOURS:-24}
       - CLEANUP_INTERVAL_MINUTES=${CLEANUP_INTERVAL_MINUTES:-30}
       - WORKER_COUNT=${WORKER_COUNT:-2}
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
     depends_on:
       tika:
         condition: service_healthy

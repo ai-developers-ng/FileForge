@@ -6,9 +6,9 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || 
 // ============================================
 // SSE Helper - stream job progress with polling fallback
 // ============================================
-const streamJob = (jobId, onUpdate) => {
+const streamJob = (jobId, token, onUpdate) => {
   if (typeof EventSource !== "undefined") {
-    const es = new EventSource(`/api/jobs/${jobId}/stream`);
+    const es = new EventSource(`/api/jobs/${jobId}/stream?token=${encodeURIComponent(token)}`);
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
       onUpdate(data);
@@ -19,7 +19,7 @@ const streamJob = (jobId, onUpdate) => {
     es.onerror = () => {
       es.close();
       const poll = async () => {
-        const response = await fetch(`/api/jobs/${jobId}`);
+        const response = await fetch(`/api/jobs/${jobId}?token=${encodeURIComponent(token)}`);
         const job = await response.json();
         onUpdate(job);
         if (job.status !== "completed" && job.status !== "failed") {
@@ -30,7 +30,7 @@ const streamJob = (jobId, onUpdate) => {
     };
   } else {
     const poll = async () => {
-      const response = await fetch(`/api/jobs/${jobId}`);
+      const response = await fetch(`/api/jobs/${jobId}?token=${encodeURIComponent(token)}`);
       const job = await response.json();
       onUpdate(job);
       if (job.status !== "completed" && job.status !== "failed") {
@@ -313,7 +313,7 @@ const updateOverallStatus = () => {
   setProgress(calculateOverallProgress());
 };
 
-const pollJob = async (jobIndex, jobId, jobMode) => {
+const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
   const onUpdate = (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
@@ -323,7 +323,7 @@ const pollJob = async (jobIndex, jobId, jobMode) => {
     activeJobs[jobIndex].result = job;
 
     if (job.status === "completed") {
-      updateFilePillStatus(jobIndex, "Done", jobId);
+      updateFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateFilePillStatus(jobIndex, "Failed");
     } else {
@@ -337,9 +337,9 @@ const pollJob = async (jobIndex, jobId, jobMode) => {
         if (activeJobs.length === 1) {
           const lastCompleted = activeJobs.find((j) => j.status === "completed");
           if (lastCompleted) {
-            setActionState(jobMode, lastCompleted.jobId, true);
+            setActionState(jobMode, lastCompleted.jobId, lastCompleted.accessToken, true);
             try {
-              const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result`);
+              const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result?token=${encodeURIComponent(lastCompleted.accessToken)}`);
               const result = await resultResponse.json();
               resultText.value = result.final_text || "No text extracted.";
             } catch {
@@ -347,12 +347,12 @@ const pollJob = async (jobIndex, jobId, jobMode) => {
             }
           }
         } else {
-          setActionState(jobMode, null, false);
+          setActionState(jobMode, null, null, false);
           const completedJobs = activeJobs.filter((j) => j.status === "completed" && j.jobId);
           const allTexts = [];
           for (const completedJob of completedJobs) {
             try {
-              const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result`);
+              const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result?token=${encodeURIComponent(completedJob.accessToken)}`);
               const result = await resultResponse.json();
               if (result.final_text) {
                 allTexts.push(`--- ${completedJob.filename} ---\n${result.final_text}`);
@@ -371,7 +371,7 @@ const pollJob = async (jobIndex, jobId, jobMode) => {
 
   // Try SSE first, fallback to polling
   if (typeof EventSource !== "undefined") {
-    const es = new EventSource(`/api/jobs/${jobId}/stream`);
+    const es = new EventSource(`/api/jobs/${jobId}/stream?token=${encodeURIComponent(accessToken)}`);
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
       onUpdate(data);
@@ -383,7 +383,7 @@ const pollJob = async (jobIndex, jobId, jobMode) => {
       es.close();
       // Fallback to polling
       const poll = async () => {
-        const response = await fetch(`/api/jobs/${jobId}`);
+        const response = await fetch(`/api/jobs/${jobId}?token=${encodeURIComponent(accessToken)}`);
         const job = await response.json();
         onUpdate(job);
         if (job.status !== "completed" && job.status !== "failed") {
@@ -450,13 +450,14 @@ const submitFiles = async () => {
       } else {
         activeJobs.push({
           jobId: payload.job_id,
+          accessToken: payload.access_token,
           fileIndex: i,
           filename: file.name,
           status: "queued",
           progress: 0,
         });
         updateFilePillStatus(i, "Queued");
-        pollJob(i, payload.job_id, lastJobMode);
+        pollJob(i, payload.job_id, payload.access_token, lastJobMode);
       }
     } catch (err) {
       activeJobs.push({

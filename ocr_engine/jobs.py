@@ -1,4 +1,5 @@
 import json
+import secrets
 import sqlite3
 import threading
 from datetime import UTC, datetime
@@ -84,17 +85,27 @@ class JobStore:
                     """
                 )
                 conn.execute("pragma user_version = 7;")
+            if version < 8:
+                try:
+                    conn.execute("alter table jobs add column access_token text;")
+                    # Generate tokens for existing jobs
+                    conn.execute("update jobs set access_token = hex(randomblob(16)) where access_token is null;")
+                except sqlite3.OperationalError:
+                    pass
+                conn.execute("pragma user_version = 8;")
 
     def create_job(self, job_id, filename, options):
         now = datetime.now(UTC).replace(tzinfo=None).isoformat()
+        access_token = secrets.token_urlsafe(32)
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                insert into jobs (id, filename, status, created_at, updated_at, progress, options)
-                values (?, ?, ?, ?, ?, ?, ?)
+                insert into jobs (id, filename, status, created_at, updated_at, progress, options, access_token)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, filename, "queued", now, now, 0, json.dumps(options)),
+                (job_id, filename, "queued", now, now, 0, json.dumps(options), access_token),
             )
+        return access_token
 
     def update_job(self, job_id, **fields):
         fields["updated_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
@@ -103,13 +114,21 @@ class JobStore:
         with self._lock, self._connect() as conn:
             conn.execute(f"update jobs set {keys} where id=?", values)
 
-    def get_job(self, job_id):
+    def get_job(self, job_id, access_token=None):
         with self._lock, self._connect() as conn:
-            row = conn.execute(
-                "select id, filename, status, created_at, updated_at, result_path, text_path, pdf_path, progress, error, options, image_path, document_path, audio_path, video_path "
-                "from jobs where id=?",
-                (job_id,),
-            ).fetchone()
+            if access_token:
+                row = conn.execute(
+                    "select id, filename, status, created_at, updated_at, result_path, text_path, pdf_path, progress, error, options, image_path, document_path, audio_path, video_path "
+                    "from jobs where id=? and access_token=?",
+                    (job_id, access_token),
+                ).fetchone()
+            else:
+                # For backward compatibility - allow internal access without token
+                row = conn.execute(
+                    "select id, filename, status, created_at, updated_at, result_path, text_path, pdf_path, progress, error, options, image_path, document_path, audio_path, video_path "
+                    "from jobs where id=?",
+                    (job_id,),
+                ).fetchone()
         if not row:
             return None
         return {
