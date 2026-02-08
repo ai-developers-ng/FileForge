@@ -18,7 +18,6 @@
                 <li><a href="#audio" class="docs-nav-link">Audio Conversion</a></li>
                 <li><a href="#video" class="docs-nav-link">Video Conversion</a></li>
                 <li><a href="#api" class="docs-nav-link">REST API</a></li>
-                <li><a href="#self-hosting" class="docs-nav-link">Self-Hosting</a></li>
                 <li><a href="#limits" class="docs-nav-link">Limits & Cleanup</a></li>
             </ul>
         </nav>
@@ -291,17 +290,32 @@
                     <div class="docs-code-header">Response</div>
 <pre class="docs-code"><code>{
   "job_id": "a1b2c3d4-...",
+  "access_token": "xyz789...",
   "status": "queued",
   "result_url": "/api/jobs/a1b2c3d4-.../result"
 }</code></pre>
+                </div>
+
+                <div class="docs-callout">
+                    <div class="docs-callout-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                    </div>
+                    <div>
+                        <strong>Important:</strong> Save the <code>access_token</code> from the response &mdash; you'll need it to check status and download results. Tokens are session-specific and cannot be recovered.
+                    </div>
                 </div>
 
                 <h3>Check Job Status</h3>
                 <div class="docs-code-block">
                     <div class="docs-code-header">
                         <span class="docs-code-method get">GET</span>
-                        <code>/api/jobs/{job_id}</code>
+                        <code>/api/jobs/{job_id}?token={access_token}</code>
                     </div>
+<pre class="docs-code"><code>curl "{{ '{{' }}BASE_URL{{ '}}' }}/api/jobs/a1b2c3d4-...?token=xyz789..."</code></pre>
+                </div>
+
+                <div class="docs-code-block">
+                    <div class="docs-code-header">Response</div>
 <pre class="docs-code"><code>{
   "id": "a1b2c3d4-...",
   "status": "completed",
@@ -314,18 +328,20 @@
                 <div class="docs-code-block">
                     <div class="docs-code-header">
                         <span class="docs-code-method get">GET</span>
-                        <code>/api/jobs/{job_id}/result</code>
+                        <code>/api/jobs/{job_id}/result?token={access_token}</code>
                     </div>
                     <p class="docs-code-desc">Returns the full result JSON when the job is complete, or <code>202</code> while still processing.</p>
+<pre class="docs-code"><code>curl "{{ '{{' }}BASE_URL{{ '}}' }}/api/jobs/a1b2c3d4-.../result?token=xyz789..."</code></pre>
                 </div>
 
                 <h3>Download Output</h3>
                 <div class="docs-code-block">
                     <div class="docs-code-header">
                         <span class="docs-code-method get">GET</span>
-                        <code>/api/jobs/{job_id}/download/{format}</code>
+                        <code>/api/jobs/{job_id}/download/{format}?token={access_token}</code>
                     </div>
                     <p class="docs-code-desc">Download the converted file. Format depends on job type:</p>
+<pre class="docs-code"><code>curl -O "{{ '{{' }}BASE_URL{{ '}}' }}/api/jobs/a1b2c3d4-.../download/txt?token=xyz789..."</code></pre>
                     <div class="docs-table-wrap">
                         <table class="docs-table">
                             <thead>
@@ -360,42 +376,6 @@
                 </div>
             </section>
 
-            <!-- Self-Hosting -->
-            <section id="self-hosting" class="docs-section">
-                <div class="docs-section-icon">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-                </div>
-                <h2>Self-Hosting</h2>
-                <p>Run FileForge on your own server with Docker.</p>
-
-                <h3>Quick Start (without Tika)</h3>
-                <div class="docs-code-block">
-<pre class="docs-code"><code>docker compose up -d</code></pre>
-                </div>
-
-                <h3>Full Stack (with Apache Tika)</h3>
-                <div class="docs-code-block">
-<pre class="docs-code"><code>docker compose -f docker-compose.full.yml up -d</code></pre>
-                </div>
-                <p>Apache Tika adds enhanced text extraction and metadata support for a wider range of document types.</p>
-
-                <h3>Environment Variables</h3>
-                <div class="docs-table-wrap">
-                    <table class="docs-table">
-                        <thead>
-                            <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-                        </thead>
-                        <tbody>
-                            <tr><td><code>MAX_FILE_MB</code></td><td>25</td><td>Maximum upload file size in megabytes</td></tr>
-                            <tr><td><code>TIKA_SERVER_URL</code></td><td>http://localhost:9998</td><td>Apache Tika server URL</td></tr>
-                            <tr><td><code>CLEANUP_TTL_HOURS</code></td><td>24</td><td>Hours before processed files are deleted</td></tr>
-                            <tr><td><code>CLEANUP_INTERVAL_MINUTES</code></td><td>30</td><td>How often the cleanup task runs</td></tr>
-                            <tr><td><code>SECRET_KEY</code></td><td><em>dev key</em></td><td>Flask secret key (change in production)</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </section>
-
             <!-- Limits -->
             <section id="limits" class="docs-section">
                 <div class="docs-section-icon">
@@ -415,18 +395,27 @@
                         <p>Processed files are automatically deleted</p>
                     </div>
                     <div class="docs-limit-card">
-                        <div class="docs-limit-value">2</div>
-                        <div class="docs-limit-label">Concurrent workers</div>
-                        <p>Jobs are queued and processed in order</p>
+                        <div class="docs-limit-value">Session</div>
+                        <div class="docs-limit-label">Job history access</div>
+                        <p>Available during your browser session only</p>
                     </div>
                 </div>
+
+                <h3>Job History & Sessions</h3>
+                <p>FileForge uses session-based access control to protect your privacy:</p>
+                <ul class="docs-list">
+                    <li><strong>Session-only access:</strong> Your job history is available only in your current browser session</li>
+                    <li><strong>Private by default:</strong> Each job has a unique access token &mdash; only you can view or download your results</li>
+                    <li><strong>No permanent storage:</strong> When you close your browser or clear cookies, you lose access to your job history</li>
+                    <li><strong>Download immediately:</strong> Download your files while your session is active &mdash; they won't be accessible later</li>
+                </ul>
 
                 <div class="docs-callout">
                     <div class="docs-callout-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
                     </div>
                     <div>
-                        <strong>Privacy:</strong> All uploaded files and results are automatically purged after the retention period. No data is shared with third parties.
+                        <strong>Privacy:</strong> All uploaded files and results are automatically purged after 24 hours. Jobs are isolated per session &mdash; other users cannot access your files. No data is shared with third parties.
                     </div>
                 </div>
             </section>

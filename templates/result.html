@@ -48,9 +48,38 @@
         <div class="result-actions">
             <a class="ghost btn" href="{{ url_for('index') }}">Back to Home</a>
             {% if job.status == "completed" %}
-            <a class="primary btn" href="/api/jobs/{{ job.id }}/download/txt?token={{ token }}">Download TXT</a>
-            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON</a>
-            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/pdf?token={{ token }}">Download PDF</a>
+                {% set job_type = job.options.get('job_type', 'ocr') %}
+
+                {% if job_type == 'image' %}
+                    {% set output_format = job.options.get('output_format', 'png') %}
+                    <a class="primary btn" href="/api/jobs/{{ job.id }}/download/image?token={{ token }}">Download {{ output_format.upper() }}</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON (Metadata)</a>
+
+                {% elif job_type == 'document' %}
+                    {% set output_format = job.options.get('output_format', 'pdf') %}
+                    <a class="primary btn" href="/api/jobs/{{ job.id }}/download/document?token={{ token }}">Download {{ output_format.upper() }}</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON (Metadata)</a>
+
+                {% elif job_type == 'audio' %}
+                    {% set output_format = job.options.get('output_format', 'mp3') %}
+                    <a class="primary btn" href="/api/jobs/{{ job.id }}/download/audio?token={{ token }}">Download {{ output_format.upper() }}</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON (Metadata)</a>
+
+                {% elif job_type == 'video' %}
+                    {% set output_format = job.options.get('output_format', 'mp4') %}
+                    <a class="primary btn" href="/api/jobs/{{ job.id }}/download/video?token={{ token }}">Download {{ output_format.upper() }}</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON (Metadata)</a>
+
+                {% elif job_type == 'pdf' %}
+                    <a class="primary btn" href="/api/jobs/{{ job.id }}/download/pdf?token={{ token }}">Download PDF</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON (Metadata)</a>
+
+                {% else %}
+                    {# OCR job - show TXT, JSON, PDF #}
+                    <a class="primary btn" href="/api/jobs/{{ job.id }}/download/txt?token={{ token }}">Download TXT</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json?token={{ token }}">Download JSON</a>
+                    <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/pdf?token={{ token }}">Download PDF</a>
+                {% endif %}
             {% endif %}
         </div>
     </div>

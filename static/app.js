@@ -507,13 +507,13 @@ const renderImageFiles = (files) => {
   });
 };
 
-const updateImageFilePillStatus = (index, status, jobId = null) => {
+const updateImageFilePillStatus = (index, status, jobId = null, accessToken = null) => {
   const pill = imageFileList?.querySelector(`[data-file-index="${index}"]`);
   if (pill) {
     const statusSpan = pill.querySelector(".file-status");
     if (statusSpan) {
-      if (status === "Done" && jobId) {
-        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/image" class="file-download-link image">Download</a>`;
+      if (status === "Done" && jobId && accessToken) {
+        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/image?token=${encodeURIComponent(accessToken)}" class="file-download-link image">Download</a>`;
       } else {
         statusSpan.textContent = status;
       }
@@ -554,15 +554,15 @@ const updateImageOverallStatus = () => {
   setImageProgress(calculateImageOverallProgress());
 };
 
-const pollImageJob = (jobIndex, jobId) => {
-  streamJob(jobId, (job) => {
+const pollImageJob = (jobIndex, jobId, accessToken) => {
+  streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
     activeImageJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeImageJobs[jobIndex].status = job.status;
     activeImageJobs[jobIndex].result = job;
     if (job.status === "completed") {
-      updateImageFilePillStatus(jobIndex, "Done", jobId);
+      updateImageFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateImageFilePillStatus(jobIndex, "Failed");
     } else {
@@ -622,13 +622,14 @@ const submitImageFiles = async () => {
       } else {
         activeImageJobs.push({
           jobId: payload.job_id,
+          accessToken: payload.access_token,
           fileIndex: i,
           filename: file.name,
           status: "queued",
           progress: 0,
         });
         updateImageFilePillStatus(i, "Queued");
-        pollImageJob(i, payload.job_id);
+        pollImageJob(i, payload.job_id, payload.access_token);
       }
     } catch (err) {
       activeImageJobs.push({
@@ -760,13 +761,13 @@ const renderDocumentFiles = (files) => {
   });
 };
 
-const updateDocumentFilePillStatus = (index, status, jobId = null) => {
+const updateDocumentFilePillStatus = (index, status, jobId = null, accessToken = null) => {
   const pill = documentFileList?.querySelector(`[data-file-index="${index}"]`);
   if (pill) {
     const statusSpan = pill.querySelector(".file-status");
     if (statusSpan) {
-      if (status === "Done" && jobId) {
-        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/document" class="file-download-link document">Download</a>`;
+      if (status === "Done" && jobId && accessToken) {
+        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/document?token=${encodeURIComponent(accessToken)}" class="file-download-link document">Download</a>`;
       } else {
         statusSpan.textContent = status;
       }
@@ -807,15 +808,15 @@ const updateDocumentOverallStatus = () => {
   setDocumentProgress(calculateDocumentOverallProgress());
 };
 
-const pollDocumentJob = (jobIndex, jobId) => {
-  streamJob(jobId, (job) => {
+const pollDocumentJob = (jobIndex, jobId, accessToken) => {
+  streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
     activeDocumentJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeDocumentJobs[jobIndex].status = job.status;
     activeDocumentJobs[jobIndex].result = job;
     if (job.status === "completed") {
-      updateDocumentFilePillStatus(jobIndex, "Done", jobId);
+      updateDocumentFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateDocumentFilePillStatus(jobIndex, "Failed");
     } else {
@@ -865,13 +866,14 @@ const submitDocumentFiles = async () => {
       } else {
         activeDocumentJobs.push({
           jobId: payload.job_id,
+          accessToken: payload.access_token,
           fileIndex: i,
           filename: file.name,
           status: "queued",
           progress: 0,
         });
         updateDocumentFilePillStatus(i, "Queued");
-        pollDocumentJob(i, payload.job_id);
+        pollDocumentJob(i, payload.job_id, payload.access_token);
       }
     } catch (err) {
       activeDocumentJobs.push({
@@ -921,13 +923,13 @@ const renderAudioFiles = (files) => {
   });
 };
 
-const updateAudioFilePillStatus = (index, status, jobId = null) => {
+const updateAudioFilePillStatus = (index, status, jobId = null, accessToken = null) => {
   const pill = audioFileList?.querySelector(`[data-file-index="${index}"]`);
   if (pill) {
     const statusSpan = pill.querySelector(".file-status");
     if (statusSpan) {
-      if (status === "Done" && jobId) {
-        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/audio" class="file-download-link audio">Download</a>`;
+      if (status === "Done" && jobId && accessToken) {
+        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/audio?token=${encodeURIComponent(accessToken)}" class="file-download-link audio">Download</a>`;
       } else {
         statusSpan.textContent = status;
       }
@@ -968,15 +970,15 @@ const updateAudioOverallStatus = () => {
   setAudioProgress(calculateAudioOverallProgress());
 };
 
-const pollAudioJob = (jobIndex, jobId) => {
-  streamJob(jobId, (job) => {
+const pollAudioJob = (jobIndex, jobId, accessToken) => {
+  streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
     activeAudioJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeAudioJobs[jobIndex].status = job.status;
     activeAudioJobs[jobIndex].result = job;
     if (job.status === "completed") {
-      updateAudioFilePillStatus(jobIndex, "Done", jobId);
+      updateAudioFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateAudioFilePillStatus(jobIndex, "Failed");
     } else {
@@ -1026,13 +1028,14 @@ const submitAudioFiles = async () => {
       } else {
         activeAudioJobs.push({
           jobId: payload.job_id,
+          accessToken: payload.access_token,
           fileIndex: i,
           filename: file.name,
           status: "queued",
           progress: 0,
         });
         updateAudioFilePillStatus(i, "Queued");
-        pollAudioJob(i, payload.job_id);
+        pollAudioJob(i, payload.job_id, payload.access_token);
       }
     } catch (err) {
       activeAudioJobs.push({
@@ -1082,13 +1085,13 @@ const renderVideoFiles = (files) => {
   });
 };
 
-const updateVideoFilePillStatus = (index, status, jobId = null) => {
+const updateVideoFilePillStatus = (index, status, jobId = null, accessToken = null) => {
   const pill = videoFileList?.querySelector(`[data-file-index="${index}"]`);
   if (pill) {
     const statusSpan = pill.querySelector(".file-status");
     if (statusSpan) {
-      if (status === "Done" && jobId) {
-        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/video" class="file-download-link video">Download</a>`;
+      if (status === "Done" && jobId && accessToken) {
+        statusSpan.innerHTML = `<a href="/api/jobs/${jobId}/download/video?token=${encodeURIComponent(accessToken)}" class="file-download-link video">Download</a>`;
       } else {
         statusSpan.textContent = status;
       }
@@ -1129,15 +1132,15 @@ const updateVideoOverallStatus = () => {
   setVideoProgress(calculateVideoOverallProgress());
 };
 
-const pollVideoJob = (jobIndex, jobId) => {
-  streamJob(jobId, (job) => {
+const pollVideoJob = (jobIndex, jobId, accessToken) => {
+  streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
     activeVideoJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
     activeVideoJobs[jobIndex].status = job.status;
     activeVideoJobs[jobIndex].result = job;
     if (job.status === "completed") {
-      updateVideoFilePillStatus(jobIndex, "Done", jobId);
+      updateVideoFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateVideoFilePillStatus(jobIndex, "Failed");
     } else {
@@ -1187,13 +1190,14 @@ const submitVideoFiles = async () => {
       } else {
         activeVideoJobs.push({
           jobId: payload.job_id,
+          accessToken: payload.access_token,
           fileIndex: i,
           filename: file.name,
           status: "queued",
           progress: 0,
         });
         updateVideoFilePillStatus(i, "Queued");
-        pollVideoJob(i, payload.job_id);
+        pollVideoJob(i, payload.job_id, payload.access_token);
       }
     } catch (err) {
       activeVideoJobs.push({
@@ -1419,8 +1423,8 @@ const handlePdfFiles = (files) => {
   renderPdfFiles(files);
 };
 
-const pollPdfJob = (jobId) => {
-  streamJob(jobId, (job) => {
+const pollPdfJob = (jobId, accessToken) => {
+  streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
     setPdfProgress(progress);
@@ -1429,7 +1433,7 @@ const pollPdfJob = (jobId) => {
       setPdfResultMeta("Done", "Completed");
       setPdfProgress(100);
       if (pdfPreviewArea) {
-        pdfPreviewArea.innerHTML = `<a href="/api/jobs/${jobId}/download/pdf" class="primary btn" style="display:inline-block;margin-top:10px;">Download Result</a>`;
+        pdfPreviewArea.innerHTML = `<a href="/api/jobs/${jobId}/download/pdf?token=${encodeURIComponent(accessToken)}" class="primary btn" style="display:inline-block;margin-top:10px;">Download Result</a>`;
       }
     } else if (job.status === "failed") {
       setPdfStatus(`Failed: ${job.error || "unknown error"}`);
@@ -1507,7 +1511,7 @@ const submitPdfFiles = async () => {
 
     setPdfStatus("Processing...");
     setPdfResultMeta("Processing...", "Running");
-    pollPdfJob(payload.job_id);
+    pollPdfJob(payload.job_id, payload.access_token);
   } catch (err) {
     setPdfStatus(`Error: ${err.message}`);
     setPdfResultMeta("Failed", "Error");
