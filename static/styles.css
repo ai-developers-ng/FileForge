@@ -1335,6 +1335,23 @@ button:disabled {
   text-decoration: underline;
 }
 
+/* Lists */
+.docs-list {
+  margin: 16px 0 24px 0;
+  padding-left: 24px;
+  line-height: 1.8;
+}
+
+.docs-list li {
+  margin-bottom: 12px;
+  color: var(--ink);
+}
+
+.docs-list li strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* Steps */
 .docs-steps {
   display: grid;

@@ -25,11 +25,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ara \
     tesseract-ocr-hin \
     tesseract-ocr-tur \
-    # ImageMagick
+    # ImageMagick + Ghostscript (required for PDF/PS/EPS support)
     imagemagick \
     libmagickwand-dev \
-    # Pandoc + LaTeX for PDF generation
-    pandoc \
+    ghostscript \
+    # LaTeX for PDF generation (without old pandoc)
     texlive-latex-base \
     texlive-latex-recommended \
     texlive-fonts-recommended \
@@ -43,11 +43,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     # Magic byte detection
     libmagic1 \
+    # For downloading pandoc
+    wget \
     # For health check
     curl \
-    # Clean up
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
+
+# Install newer Pandoc from GitHub (compatible with pypandoc 1.13)
+RUN wget -q https://github.com/jgm/pandoc/releases/download/3.1.11/pandoc-3.1.11-1-amd64.deb \
+    && dpkg -i pandoc-3.1.11-1-amd64.deb \
+    && rm pandoc-3.1.11-1-amd64.deb \
+    && apt-get clean
 
 # Configure ImageMagick policy to allow PDF operations
 RUN sed -i 's/rights="none" pattern="PDF"/rights="read|write" pattern="PDF"/' /etc/ImageMagick-6/policy.xml || true
@@ -75,4 +81,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5001/ || exit 1
 
 # Run with gunicorn for production
-CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "2", "--threads", "4", "--timeout", "300", "app:app"]
+# Optimized for 8GB RAM / 2 vCPU VPS - single worker with more threads
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--threads", "8", "--timeout", "300", "--max-requests", "1000", "--max-requests-jitter", "100", "--worker-class", "gthread", "app:app"]

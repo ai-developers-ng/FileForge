@@ -21,10 +21,56 @@ def _is_image(file_path):
     return mime.startswith("image/")
 
 
-def _pdf_to_images(file_path):
-    from pdf2image import convert_from_path
+def _pdf_to_images(file_path, batch_size=10):
+    """Convert PDF to images in batches to reduce memory usage.
 
-    return convert_from_path(file_path)
+    For large PDFs, processing all pages at once can cause OOM errors.
+    This function processes pages in batches and yields them one at a time.
+
+    Args:
+        file_path: Path to the PDF file
+        batch_size: Number of pages to process in each batch (default: 10)
+
+    Returns:
+        List of PIL Image objects
+    """
+    from pdf2image import convert_from_path, pdfinfo_from_path
+    import gc
+
+    # Get total page count
+    try:
+        info = pdfinfo_from_path(file_path)
+        total_pages = info.get('Pages', 0)
+        logger.info(f"PDF has {total_pages} pages, will process in batches of {batch_size}")
+    except Exception as e:
+        logger.warning(f"Could not get page count, processing all at once: {e}")
+        return convert_from_path(file_path)
+
+    # If small PDF, process all at once
+    if total_pages <= batch_size:
+        return convert_from_path(file_path)
+
+    # Process in batches for large PDFs
+    all_images = []
+    for start_page in range(1, total_pages + 1, batch_size):
+        end_page = min(start_page + batch_size - 1, total_pages)
+        logger.info(f"Converting pages {start_page}-{end_page}/{total_pages}")
+
+        try:
+            batch_images = convert_from_path(
+                file_path,
+                first_page=start_page,
+                last_page=end_page
+            )
+            all_images.extend(batch_images)
+
+            # Force garbage collection after each batch
+            gc.collect()
+        except Exception as e:
+            logger.error(f"Failed to convert pages {start_page}-{end_page}: {e}")
+            raise
+
+    return all_images
 
 
 def process_job(job_id, file_path, options, settings, job_store):
@@ -116,6 +162,7 @@ def process_job(job_id, file_path, options, settings, job_store):
             # Run OCR on all images
             ocr_page_pdfs = []
             if ocr_images:
+                import gc
                 total_pages = len(ocr_images)
                 for idx, image in enumerate(ocr_images, start=1):
                     logger.info(f"OCR processing page {idx}/{len(ocr_images)}")
@@ -133,6 +180,11 @@ def process_job(job_id, file_path, options, settings, job_store):
                     ocr_page_pdfs.append(page_pdf_bytes)
                     progress = int((idx / total_pages) * 100)
                     job_store.update_job(job_id, progress=progress)
+
+                    # Free memory after each page for large documents
+                    if total_pages > 50 and idx % 10 == 0:
+                        gc.collect()
+                        logger.info(f"Memory cleanup after page {idx}")
                 
                 result["ocr_text"] = "\n\n".join(page["text"] for page in result["pages"])
                 logger.info(f"OCR completed. Total text length: {len(result['ocr_text'])}")

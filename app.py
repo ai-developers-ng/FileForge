@@ -141,10 +141,15 @@ def create_app():
 
     @app.route("/results/<job_id>")
     def result_page(job_id):
-        job = job_store.get_job(job_id)
-        if not job:
+        token = request.args.get("token")
+        if not token:
+            flash("Access denied. Invalid or missing access token.", "error")
             return redirect(url_for("index"))
-        return render_template("result.html", job=job)
+        job = job_store.get_job(job_id, access_token=token)
+        if not job:
+            flash("Job not found or access denied.", "error")
+            return redirect(url_for("index"))
+        return render_template("result.html", job=job, token=token)
 
     @app.errorhandler(429)
     def ratelimit_handler(e):
@@ -210,14 +215,14 @@ def create_app():
                 "brightness": request.form.get("brightness", "1.0"),
                 "contrast": request.form.get("contrast", "1.0"),
             }
-            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
+            access_token = job_store.create_job(job_id, filename, options)
             executor.submit(process_image_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "document":
             options = {
                 "job_type": "document",
                 "output_format": request.form.get("output_format", "pdf"),
             }
-            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
+            access_token = job_store.create_job(job_id, filename, options)
             executor.submit(process_document_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "audio":
             options = {
@@ -225,7 +230,7 @@ def create_app():
                 "output_format": request.form.get("output_format", "mp3"),
                 "bitrate": request.form.get("bitrate", "192"),
             }
-            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
+            access_token = job_store.create_job(job_id, filename, options)
             executor.submit(process_audio_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "video":
             options = {
@@ -233,7 +238,7 @@ def create_app():
                 "output_format": request.form.get("output_format", "mp4"),
                 "quality": request.form.get("quality", "medium"),
             }
-            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
+            access_token = job_store.create_job(job_id, filename, options)
             executor.submit(process_video_job, job_id, upload_path, options, settings, job_store)
         else:
             options = {
@@ -242,14 +247,21 @@ def create_app():
                 "ocr_engine": request.form.get("ocr_engine", "tesseract"),
                 "lang": request.form.get("lang", "eng"),
             }
-            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
+            access_token = job_store.create_job(job_id, filename, options)
             executor.submit(process_job, job_id, upload_path, options, settings, job_store)
+
+        # Store job in session for user access
+        if "my_jobs" not in session:
+            session["my_jobs"] = []
+        session["my_jobs"].append({"job_id": job_id, "token": access_token})
+        session.modified = True
 
         return jsonify(
             {
                 "job_id": job_id,
+                "access_token": access_token,
                 "status": "queued",
-                "result_url": url_for("get_job_result", job_id=job_id),
+                "result_url": url_for("get_job_result", job_id=job_id, token=access_token),
             }
         )
 
@@ -329,25 +341,38 @@ def create_app():
             options["meta_keywords"] = request.form.get("meta_keywords", "")
 
         first_filename = secure_filename(files[0].filename)
-        job_store.create_job(job_id, first_filename, options, session_id=session.get("sid"))
+        access_token = job_store.create_job(job_id, first_filename, options)
         executor.submit(process_pdf_job, job_id, saved_paths, options, settings, job_store)
 
-        return jsonify({"job_id": job_id, "status": "queued"})
+        # Store job in session
+        if "my_jobs" not in session:
+            session["my_jobs"] = []
+        session["my_jobs"].append({"job_id": job_id, "token": access_token})
+        session.modified = True
+
+        return jsonify({"job_id": job_id, "access_token": access_token, "status": "queued"})
 
     @app.route("/api/jobs/<job_id>", methods=["GET"])
     def get_job(job_id):
-        job = job_store.get_job(job_id)
+        token = request.args.get("token") or request.headers.get("X-Access-Token")
+        if not token:
+            return jsonify({"error": "access denied: token required"}), 403
+        job = job_store.get_job(job_id, access_token=token)
         if not job:
-            return jsonify({"error": "job not found"}), 404
+            return jsonify({"error": "job not found or access denied"}), 404
         return jsonify(job)
 
     @app.route("/api/jobs/<job_id>/stream", methods=["GET"])
     def stream_job(job_id):
+        token = request.args.get("token") or request.headers.get("X-Access-Token")
+        if not token:
+            return jsonify({"error": "access denied: token required"}), 403
+
         def generate():
             while True:
-                job = job_store.get_job(job_id)
+                job = job_store.get_job(job_id, access_token=token)
                 if not job:
-                    yield f"data: {json.dumps({'error': 'job not found'})}\n\n"
+                    yield f"data: {json.dumps({'error': 'job not found or access denied'})}\n\n"
                     return
                 payload = {
                     "status": job["status"],
@@ -359,17 +384,22 @@ def create_app():
                     return
                 time.sleep(1)
 
-        return Response(generate(), mimetype="text/event-stream", headers={
+        response = Response(generate(), mimetype="text/event-stream", headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
-            "Content-Encoding": "identity",
+            "Content-Encoding": "identity",  # Disable compression for SSE
         })
+        response.direct_passthrough = False
+        return response
 
     @app.route("/api/jobs/<job_id>/result", methods=["GET"])
     def get_job_result(job_id):
-        job = job_store.get_job(job_id)
+        token = request.args.get("token") or request.headers.get("X-Access-Token")
+        if not token:
+            return jsonify({"error": "access denied: token required"}), 403
+        job = job_store.get_job(job_id, access_token=token)
         if not job:
-            return jsonify({"error": "job not found"}), 404
+            return jsonify({"error": "job not found or access denied"}), 404
         if job["status"] not in ("completed", "failed"):
             return jsonify({"status": job["status"]}), 202
         if not job["result_path"]:
@@ -379,9 +409,12 @@ def create_app():
 
     @app.route("/api/jobs/<job_id>/download/<fmt>", methods=["GET"])
     def download_result(job_id, fmt):
-        job = job_store.get_job(job_id)
+        token = request.args.get("token") or request.headers.get("X-Access-Token")
+        if not token:
+            return jsonify({"error": "access denied: token required"}), 403
+        job = job_store.get_job(job_id, access_token=token)
         if not job:
-            return jsonify({"error": "job not found"}), 404
+            return jsonify({"error": "job not found or access denied"}), 404
 
         # Use original filename with _OCR suffix
         original_name = os.path.splitext(job.get("filename", job_id))[0]
@@ -457,7 +490,14 @@ def create_app():
 
     @app.route("/history")
     def history():
-        jobs = job_store.list_recent_jobs(limit=50, session_id=session.get("sid"))
+        # Only show jobs from current session
+        my_jobs_data = session.get("my_jobs", [])
+        jobs = []
+        for job_data in my_jobs_data:
+            job = job_store.get_job(job_data["job_id"], access_token=job_data["token"])
+            if job:
+                job["token"] = job_data["token"]  # Include token for links
+                jobs.append(job)
         return render_template("history.html", jobs=jobs)
 
     @app.route("/docs")
