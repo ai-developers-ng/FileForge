@@ -87,12 +87,17 @@ class JobStore:
                 conn.execute("pragma user_version = 7;")
             if version < 8:
                 try:
-                    conn.execute("alter table jobs add column access_token text;")
-                    # Generate tokens for existing jobs
-                    conn.execute("update jobs set access_token = hex(randomblob(16)) where access_token is null;")
+                    conn.execute("alter table jobs add column session_id text;")
                 except sqlite3.OperationalError:
                     pass
                 conn.execute("pragma user_version = 8;")
+            if version < 9:
+                try:
+                    conn.execute("alter table jobs add column access_token text;")
+                except sqlite3.OperationalError:
+                    pass
+                conn.execute("update jobs set access_token = hex(randomblob(16)) where access_token is null;")
+                conn.execute("pragma user_version = 9;")
 
     def create_job(self, job_id, filename, options):
         now = datetime.now(UTC).replace(tzinfo=None).isoformat()
