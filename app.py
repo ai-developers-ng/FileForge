@@ -87,6 +87,12 @@ def create_app():
     executor = ThreadPoolExecutor(max_workers=settings.worker_count)
     start_cleanup_thread(settings, job_store)
 
+    @app.before_request
+    def ensure_session_id():
+        if "sid" not in session:
+            session["sid"] = str(uuid.uuid4())
+            session.permanent = True
+
     @app.context_processor
     def inject_now():
         return {"now": datetime.now(UTC)}

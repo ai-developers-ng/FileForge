@@ -159,12 +159,13 @@ def process_image_job(job_id, file_path, options, settings, job_store):
             # Save
             img.save(filename=output_path)
 
+            if not os.path.exists(output_path):
+                raise RuntimeError(f"ImageMagick failed to write output file for format '{conv_options.output_format}'")
+
             result["output_path"] = output_path
             result["output_size"] = {"width": img.width, "height": img.height}
             result["output_format"] = conv_options.output_format
-
-        # Get file size after saving
-        result["file_size_bytes"] = os.path.getsize(output_path)
+            result["file_size_bytes"] = os.path.getsize(output_path)
 
         job_store.update_job(job_id, progress=90)
 

@@ -99,7 +99,7 @@ class JobStore:
                 conn.execute("update jobs set access_token = hex(randomblob(16)) where access_token is null;")
                 conn.execute("pragma user_version = 9;")
 
-    def create_job(self, job_id, filename, options):
+    def create_job(self, job_id, filename, options, session_id=None):
         now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         access_token = secrets.token_urlsafe(32)
         with self._lock, self._connect() as conn:
@@ -173,13 +173,20 @@ class JobStore:
             paths.extend(p for p in row[1:] if p)
         return [r[0] for r in rows], paths
 
-    def list_recent_jobs(self, limit=50):
+    def list_recent_jobs(self, limit=50, session_id=None):
         with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                "select id, filename, status, created_at, updated_at, progress, options "
-                "from jobs order by created_at desc limit ?",
-                (limit,),
-            ).fetchall()
+            if session_id:
+                rows = conn.execute(
+                    "select id, filename, status, created_at, updated_at, progress, options "
+                    "from jobs where session_id = ? order by created_at desc limit ?",
+                    (session_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "select id, filename, status, created_at, updated_at, progress, options "
+                    "from jobs order by created_at desc limit ?",
+                    (limit,),
+                ).fetchall()
         return [
             {
                 "id": row[0],

@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block title %}Result - {{ job.filename }} | FileForge{% endblock %}
-{% block meta_description %}View your conversion result for {{ job.filename }}. Download your processed file in TXT, JSON, or PDF format.{% endblock %}
+{% block meta_description %}View your conversion result for {{ job.filename }}. Download your processed file.{% endblock %}
 
 {% block content %}
 <div class="page">
@@ -41,7 +41,7 @@
                 {{ job.error }}
             </div>
             {% else %}
-            <textarea class="result-textarea" readonly>Open the download links below to view full output.</textarea>
+            <textarea class="result-textarea" readonly>Your file has been processed. Use the download button below to get your result.</textarea>
             {% endif %}
         </div>
 
