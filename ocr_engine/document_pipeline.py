@@ -1,8 +1,10 @@
 """Document conversion pipeline using Pandoc via pypandoc."""
 
+import glob
 import json
 import logging
 import os
+import shutil
 from dataclasses import dataclass
 from typing import Optional
 
@@ -12,10 +14,44 @@ from .storage import document_result_path
 
 logger = logging.getLogger(__name__)
 
+# Common TeX binary directories not always in PATH
+_STATIC_TEX_SEARCH_PATHS = [
+    "/Library/TeX/texbin",  # macOS BasicTeX / MacTeX
+]
+
+
+def _candidate_tex_paths():
+    """Build a de-duplicated list of likely TeX bin directories."""
+    dynamic_paths = []
+    dynamic_paths.extend(glob.glob("/usr/local/texlive/*/bin/*"))
+    dynamic_paths.extend(glob.glob("/usr/local/texlive/*basic/bin/*"))
+
+    # Keep insertion order while removing duplicates
+    candidates = []
+    for path in [*_STATIC_TEX_SEARCH_PATHS, *dynamic_paths]:
+        if path not in candidates:
+            candidates.append(path)
+    return candidates
+
+
+def _ensure_tex_in_path():
+    """Add TeX directories to PATH so pdflatex and its helpers are found."""
+    current_path = os.environ.get("PATH", "")
+    path_entries = current_path.split(os.pathsep) if current_path else []
+    dirs_to_add = [
+        path
+        for path in _candidate_tex_paths()
+        if os.path.isdir(path) and path not in path_entries
+    ]
+    if dirs_to_add:
+        os.environ["PATH"] = os.pathsep.join(dirs_to_add + path_entries)
+        logger.info(f"Added TeX directories to PATH: {dirs_to_add}")
+
 
 @dataclass
 class DocumentConversionOptions:
     """Options for document conversion."""
+
     output_format: str = "pdf"
 
 
@@ -35,7 +71,8 @@ INPUT_FORMAT_MAP = {
     ".odt": "odt",
     ".docbook": "docbook",
     ".xml": "docbook",
-    ".txt": "plain",
+    # Pandoc no longer supports "plain" as an input reader in newer versions.
+    ".txt": "markdown",
 }
 
 # Output format mapping (user-friendly name to pandoc format)
@@ -110,36 +147,55 @@ def process_document_job(job_id, file_path, options, settings, job_store):
         # Perform conversion with pandoc
         logger.info(f"Converting {file_path} from {input_format} to {pandoc_output_format}")
 
-        # Perform conversion - try with pdflatex for PDF, fall back if not available
-        try:
-            if pandoc_output_format == "pdf":
-                # Try with pdflatex first for better PDF output
+        # Perform conversion
+        if pandoc_output_format == "pdf":
+            # Ensure TeX binaries (pdflatex, kpsewhich, etc.) are on PATH
+            _ensure_tex_in_path()
+
+            # Try PDF engines in order of preference
+            pdf_engine_names = ["pdflatex", "xelatex", "lualatex", "weasyprint", "wkhtmltopdf", "typst"]
+            discovered_engines = [(name, shutil.which(name)) for name in pdf_engine_names]
+            available_engines = [(name, path) for name, path in discovered_engines if path]
+
+            if not available_engines:
+                raise RuntimeError(
+                    "No PDF engine available. Install one of: "
+                    f"{', '.join(pdf_engine_names)}. "
+                    "On macOS: brew install basictex. "
+                    "On Debian/Ubuntu: apt-get install texlive-latex-base"
+                )
+
+            last_err = None
+            for engine_name, engine_path in available_engines:
                 try:
                     pypandoc.convert_file(
                         file_path,
                         pandoc_output_format,
                         format=input_format,
                         outputfile=output_path,
-                        extra_args=["--pdf-engine=pdflatex"],
+                        extra_args=[f"--pdf-engine={engine_path}"],
                     )
-                except (RuntimeError, OSError) as pdf_err:
-                    # pdflatex not available, try default engine
-                    logger.warning(f"pdflatex not available ({pdf_err}), trying default PDF engine")
-                    pypandoc.convert_file(
-                        file_path,
-                        pandoc_output_format,
-                        format=input_format,
-                        outputfile=output_path,
-                    )
-            else:
-                pypandoc.convert_file(
-                    file_path,
-                    pandoc_output_format,
-                    format=input_format,
-                    outputfile=output_path,
-                )
-        except RuntimeError as e:
-            raise
+                    logger.info(f"PDF generated using {engine_name} ({engine_path})")
+                    last_err = None
+                    break
+                except (RuntimeError, OSError) as err:
+                    logger.debug(f"PDF engine {engine_name} failed: {err}")
+                    last_err = err
+                    continue
+
+            if last_err:
+                raise RuntimeError(
+                    "PDF engine detected but conversion failed. "
+                    f"Tried: {', '.join(name for name, _ in available_engines)}. "
+                    f"Last error: {last_err}"
+                ) from last_err
+        else:
+            pypandoc.convert_file(
+                file_path,
+                pandoc_output_format,
+                format=input_format,
+                outputfile=output_path,
+            )
 
         job_store.update_job(job_id, progress=80)
 
