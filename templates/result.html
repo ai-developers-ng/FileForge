@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block title %}Result - {{ job.filename }} | FileForge{% endblock %}
-{% block meta_description %}View your conversion result for {{ job.filename }}. Download your processed file in TXT, JSON, or PDF format.{% endblock %}
+{% block meta_description %}View your conversion result for {{ job.filename }}. Download your processed file.{% endblock %}
 
 {% block content %}
 <div class="page">
@@ -41,16 +41,29 @@
                 {{ job.error }}
             </div>
             {% else %}
-            <textarea class="result-textarea" readonly>Open the download links below to view full output.</textarea>
+            <textarea class="result-textarea" readonly>Your file has been processed. Use the download button below to get your result.</textarea>
             {% endif %}
         </div>
 
         <div class="result-actions">
             <a class="ghost btn" href="{{ url_for('index') }}">Back to Home</a>
             {% if job.status == "completed" %}
-            <a class="primary btn" href="/api/jobs/{{ job.id }}/download/txt">Download TXT</a>
-            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json">Download JSON</a>
-            <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/pdf">Download PDF</a>
+                {% set jtype = job.options.get('job_type', 'ocr') %}
+                {% if jtype == 'ocr' %}
+                <a class="primary btn" href="/api/jobs/{{ job.id }}/download/txt">Download TXT</a>
+                <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/json">Download JSON</a>
+                <a class="ghost btn" href="/api/jobs/{{ job.id }}/download/pdf">Download PDF</a>
+                {% elif jtype == 'image' %}
+                <a class="primary btn" href="/api/jobs/{{ job.id }}/download/image">Download Image</a>
+                {% elif jtype == 'document' %}
+                <a class="primary btn" href="/api/jobs/{{ job.id }}/download/document">Download Document</a>
+                {% elif jtype == 'audio' %}
+                <a class="primary btn" href="/api/jobs/{{ job.id }}/download/audio">Download Audio</a>
+                {% elif jtype == 'video' %}
+                <a class="primary btn" href="/api/jobs/{{ job.id }}/download/video">Download Video</a>
+                {% elif jtype == 'pdf' %}
+                <a class="primary btn" href="/api/jobs/{{ job.id }}/download/pdf">Download PDF</a>
+                {% endif %}
             {% endif %}
         </div>
     </div>

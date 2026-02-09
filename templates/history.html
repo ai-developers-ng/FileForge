@@ -10,7 +10,7 @@
 
     {% if jobs %}
     <div class="history-table-wrap">
-        <table class="docs-table history-table">
+        <table class="docs-table history-table" id="historyTable">
             <thead>
                 <tr>
                     <th>File</th>
@@ -23,7 +23,7 @@
             </thead>
             <tbody>
                 {% for job in jobs %}
-                <tr>
+                <tr data-job-id="{{ job.id }}" data-job-status="{{ job.status }}">
                     <td class="history-filename">{{ job.filename }}</td>
                     <td>
                         <span class="format-badge">{{ job.options.get('job_type', 'ocr') | upper }}</span>
@@ -31,11 +31,20 @@
                     <td>
                         <span class="history-status history-status--{{ job.status }}">{{ job.status }}</span>
                     </td>
-                    <td>{{ job.progress }}%</td>
+                    <td>
+                        <div class="history-progress-wrap">
+                            <div class="history-progress-track">
+                                <div class="history-progress-fill history-progress-fill--{{ job.status }}" style="width: {{ job.progress }}%"></div>
+                            </div>
+                            <span class="history-progress-text">{{ job.progress }}%</span>
+                        </div>
+                    </td>
                     <td class="history-date">{{ job.created_at[:19].replace('T', ' ') }}</td>
                     <td>
                         {% if job.status == 'completed' %}
                             <a href="/results/{{ job.id }}" class="history-action">View</a>
+                        {% elif job.status in ('queued', 'running') %}
+                            <span class="history-action history-action--pending">In progress</span>
                         {% else %}
                             &mdash;
                         {% endif %}
@@ -49,4 +58,71 @@
     <p>No jobs found. Upload a file to get started.</p>
     {% endif %}
 </div>
+
+<script>
+(function () {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+    const table = document.getElementById("historyTable");
+    if (!table) return;
+
+    const refreshActiveJobs = async () => {
+        const activeRows = table.querySelectorAll('tr[data-job-status="queued"], tr[data-job-status="running"]');
+        if (activeRows.length === 0) return;
+
+        for (const row of activeRows) {
+            const jobId = row.dataset.jobId;
+            try {
+                const res = await fetch(`/api/jobs/${jobId}`);
+                if (!res.ok) continue;
+                const job = await res.json();
+
+                const progress = typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
+
+                // Update status badge
+                const statusEl = row.querySelector(".history-status");
+                if (statusEl) {
+                    statusEl.className = `history-status history-status--${job.status}`;
+                    statusEl.textContent = job.status;
+                }
+
+                // Update progress bar
+                const fill = row.querySelector(".history-progress-fill");
+                if (fill) {
+                    fill.style.width = `${progress}%`;
+                    fill.className = `history-progress-fill history-progress-fill--${job.status}`;
+                }
+                const text = row.querySelector(".history-progress-text");
+                if (text) text.textContent = `${progress}%`;
+
+                // Update row status for next poll cycle
+                row.dataset.jobStatus = job.status;
+
+                // Update actions column
+                const actionsCell = row.querySelector("td:last-child");
+                if (actionsCell) {
+                    if (job.status === "completed") {
+                        actionsCell.innerHTML = `<a href="/results/${jobId}" class="history-action">View</a>`;
+                    } else if (job.status === "failed") {
+                        actionsCell.innerHTML = "&mdash;";
+                    }
+                }
+            } catch {
+                // Skip failed fetches
+            }
+        }
+
+        // Continue polling if there are still active jobs
+        const remaining = table.querySelectorAll('tr[data-job-status="queued"], tr[data-job-status="running"]');
+        if (remaining.length > 0) {
+            setTimeout(refreshActiveJobs, 2000);
+        }
+    };
+
+    // Start polling if any active jobs exist
+    const hasActive = table.querySelectorAll('tr[data-job-status="queued"], tr[data-job-status="running"]').length > 0;
+    if (hasActive) {
+        setTimeout(refreshActiveJobs, 2000);
+    }
+})();
+</script>
 {% endblock %}

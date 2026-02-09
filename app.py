@@ -5,7 +5,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 
-from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_compress import Compress
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -86,6 +86,12 @@ def create_app():
     job_store = JobStore(settings.db_path)
     executor = ThreadPoolExecutor(max_workers=settings.worker_count)
     start_cleanup_thread(settings, job_store)
+
+    @app.before_request
+    def ensure_session_id():
+        if "sid" not in session:
+            session["sid"] = str(uuid.uuid4())
+            session.permanent = True
 
     @app.context_processor
     def inject_now():
@@ -204,14 +210,14 @@ def create_app():
                 "brightness": request.form.get("brightness", "1.0"),
                 "contrast": request.form.get("contrast", "1.0"),
             }
-            job_store.create_job(job_id, filename, options)
+            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
             executor.submit(process_image_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "document":
             options = {
                 "job_type": "document",
                 "output_format": request.form.get("output_format", "pdf"),
             }
-            job_store.create_job(job_id, filename, options)
+            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
             executor.submit(process_document_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "audio":
             options = {
@@ -219,7 +225,7 @@ def create_app():
                 "output_format": request.form.get("output_format", "mp3"),
                 "bitrate": request.form.get("bitrate", "192"),
             }
-            job_store.create_job(job_id, filename, options)
+            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
             executor.submit(process_audio_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "video":
             options = {
@@ -227,7 +233,7 @@ def create_app():
                 "output_format": request.form.get("output_format", "mp4"),
                 "quality": request.form.get("quality", "medium"),
             }
-            job_store.create_job(job_id, filename, options)
+            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
             executor.submit(process_video_job, job_id, upload_path, options, settings, job_store)
         else:
             options = {
@@ -236,7 +242,7 @@ def create_app():
                 "ocr_engine": request.form.get("ocr_engine", "tesseract"),
                 "lang": request.form.get("lang", "eng"),
             }
-            job_store.create_job(job_id, filename, options)
+            job_store.create_job(job_id, filename, options, session_id=session.get("sid"))
             executor.submit(process_job, job_id, upload_path, options, settings, job_store)
 
         return jsonify(
@@ -323,7 +329,7 @@ def create_app():
             options["meta_keywords"] = request.form.get("meta_keywords", "")
 
         first_filename = secure_filename(files[0].filename)
-        job_store.create_job(job_id, first_filename, options)
+        job_store.create_job(job_id, first_filename, options, session_id=session.get("sid"))
         executor.submit(process_pdf_job, job_id, saved_paths, options, settings, job_store)
 
         return jsonify({"job_id": job_id, "status": "queued"})
@@ -337,7 +343,6 @@ def create_app():
 
     @app.route("/api/jobs/<job_id>/stream", methods=["GET"])
     def stream_job(job_id):
-        @compress.exempt
         def generate():
             while True:
                 job = job_store.get_job(job_id)
@@ -357,6 +362,7 @@ def create_app():
         return Response(generate(), mimetype="text/event-stream", headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",
         })
 
     @app.route("/api/jobs/<job_id>/result", methods=["GET"])
@@ -451,7 +457,7 @@ def create_app():
 
     @app.route("/history")
     def history():
-        jobs = job_store.list_recent_jobs(limit=50)
+        jobs = job_store.list_recent_jobs(limit=50, session_id=session.get("sid"))
         return render_template("history.html", jobs=jobs)
 
     @app.route("/docs")

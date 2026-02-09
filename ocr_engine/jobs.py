@@ -84,16 +84,22 @@ class JobStore:
                     """
                 )
                 conn.execute("pragma user_version = 7;")
+            if version < 8:
+                try:
+                    conn.execute("alter table jobs add column session_id text;")
+                except sqlite3.OperationalError:
+                    pass
+                conn.execute("pragma user_version = 8;")
 
-    def create_job(self, job_id, filename, options):
+    def create_job(self, job_id, filename, options, session_id=None):
         now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                insert into jobs (id, filename, status, created_at, updated_at, progress, options)
-                values (?, ?, ?, ?, ?, ?, ?)
+                insert into jobs (id, filename, status, created_at, updated_at, progress, options, session_id)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, filename, "queued", now, now, 0, json.dumps(options)),
+                (job_id, filename, "queued", now, now, 0, json.dumps(options), session_id),
             )
 
     def update_job(self, job_id, **fields):
@@ -149,13 +155,20 @@ class JobStore:
             paths.extend(p for p in row[1:] if p)
         return [r[0] for r in rows], paths
 
-    def list_recent_jobs(self, limit=50):
+    def list_recent_jobs(self, limit=50, session_id=None):
         with self._lock, self._connect() as conn:
-            rows = conn.execute(
-                "select id, filename, status, created_at, updated_at, progress, options "
-                "from jobs order by created_at desc limit ?",
-                (limit,),
-            ).fetchall()
+            if session_id:
+                rows = conn.execute(
+                    "select id, filename, status, created_at, updated_at, progress, options "
+                    "from jobs where session_id = ? order by created_at desc limit ?",
+                    (session_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "select id, filename, status, created_at, updated_at, progress, options "
+                    "from jobs order by created_at desc limit ?",
+                    (limit,),
+                ).fetchall()
         return [
             {
                 "id": row[0],
