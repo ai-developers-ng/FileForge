@@ -1,4 +1,6 @@
+import io
 import json
+import logging
 import os
 import time
 import uuid
@@ -15,6 +17,7 @@ from werkzeug.utils import secure_filename
 from ocr_engine.audio_pipeline import process_audio_job
 from ocr_engine.cleanup import start_cleanup_thread
 from ocr_engine.config import Settings
+from ocr_engine.crypto import KeyStore, decrypt_file, encrypt_file, decrypt_to_tempfile, key_from_b64
 from ocr_engine.document_pipeline import process_document_job
 from ocr_engine.image_pipeline import process_image_job
 from ocr_engine.jobs import JobStore
@@ -22,6 +25,8 @@ from ocr_engine.pdf_pipeline import process_pdf_job
 from ocr_engine.pipeline import process_job
 from ocr_engine.storage import ensure_dirs
 from ocr_engine.video_pipeline import process_video_job
+
+logger = logging.getLogger(__name__)
 
 
 MIME_TO_EXT = {
@@ -84,8 +89,72 @@ def create_app():
     settings = Settings()
     ensure_dirs(settings.data_dir, settings.upload_dir, settings.result_dir)
     job_store = JobStore(settings.db_path)
+    key_store = KeyStore()
     executor = ThreadPoolExecutor(max_workers=settings.worker_count)
-    start_cleanup_thread(settings, job_store)
+    start_cleanup_thread(settings, job_store, key_store)
+
+    def _get_encryption_key():
+        """Extract and validate the encryption key from the request header."""
+        key_b64 = request.headers.get("X-Encryption-Key")
+        if not key_b64:
+            return None
+        try:
+            return key_from_b64(key_b64)
+        except (ValueError, Exception):
+            return None
+
+    def _send_encrypted_file(file_path, download_name, job_id):
+        """Decrypt a file if encrypted and send as download."""
+        enc_key = _get_encryption_key() or key_store.get(job_id)
+        if enc_key:
+            try:
+                plaintext = decrypt_file(file_path, enc_key)
+                return send_file(io.BytesIO(plaintext), as_attachment=True, download_name=download_name)
+            except Exception:
+                return jsonify({"error": "file decryption failed — invalid or expired key"}), 403
+        return send_file(file_path, as_attachment=True, download_name=download_name)
+
+    def _run_encrypted_pipeline(pipeline_fn, job_id, file_path_or_paths, options, settings, job_store):
+        """Wrap a pipeline: decrypt inputs -> run -> encrypt outputs."""
+        enc_key = key_store.get(job_id)
+        if not enc_key:
+            if isinstance(file_path_or_paths, list):
+                return pipeline_fn(job_id, file_path_or_paths, options, settings, job_store)
+            return pipeline_fn(job_id, file_path_or_paths, options, settings, job_store)
+
+        temp_paths = []
+        try:
+            if isinstance(file_path_or_paths, list):
+                decrypted = []
+                for fp in file_path_or_paths:
+                    ext = os.path.splitext(fp)[1]
+                    tmp = decrypt_to_tempfile(fp, enc_key, suffix=ext)
+                    temp_paths.append(tmp)
+                    decrypted.append(tmp)
+                pipeline_fn(job_id, decrypted, options, settings, job_store)
+            else:
+                ext = os.path.splitext(file_path_or_paths)[1]
+                tmp = decrypt_to_tempfile(file_path_or_paths, enc_key, suffix=ext)
+                temp_paths.append(tmp)
+                pipeline_fn(job_id, tmp, options, settings, job_store)
+
+            # Encrypt all output files
+            job = job_store.get_job(job_id)
+            if job:
+                for field in ("result_path", "text_path", "pdf_path", "image_path",
+                              "document_path", "audio_path", "video_path"):
+                    path = job.get(field)
+                    if path and os.path.exists(path):
+                        encrypt_file(path, enc_key)
+        except Exception:
+            raise
+        finally:
+            for tmp in temp_paths:
+                try:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                except OSError:
+                    pass
 
     @app.before_request
     def ensure_session_id():
@@ -201,6 +270,12 @@ def create_app():
             os.remove(upload_path)
             return jsonify({"error": "file content does not match its extension"}), 400
 
+        # Encrypt uploaded file at rest
+        enc_key = _get_encryption_key()
+        if enc_key:
+            encrypt_file(upload_path, enc_key)
+            key_store.store(job_id, enc_key)
+
         if job_type == "image":
             options = {
                 "job_type": "image",
@@ -216,14 +291,14 @@ def create_app():
                 "contrast": request.form.get("contrast", "1.0"),
             }
             access_token = job_store.create_job(job_id, filename, options)
-            executor.submit(process_image_job, job_id, upload_path, options, settings, job_store)
+            executor.submit(_run_encrypted_pipeline, process_image_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "document":
             options = {
                 "job_type": "document",
                 "output_format": request.form.get("output_format", "pdf"),
             }
             access_token = job_store.create_job(job_id, filename, options)
-            executor.submit(process_document_job, job_id, upload_path, options, settings, job_store)
+            executor.submit(_run_encrypted_pipeline, process_document_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "audio":
             options = {
                 "job_type": "audio",
@@ -231,7 +306,7 @@ def create_app():
                 "bitrate": request.form.get("bitrate", "192"),
             }
             access_token = job_store.create_job(job_id, filename, options)
-            executor.submit(process_audio_job, job_id, upload_path, options, settings, job_store)
+            executor.submit(_run_encrypted_pipeline, process_audio_job, job_id, upload_path, options, settings, job_store)
         elif job_type == "video":
             options = {
                 "job_type": "video",
@@ -239,7 +314,7 @@ def create_app():
                 "quality": request.form.get("quality", "medium"),
             }
             access_token = job_store.create_job(job_id, filename, options)
-            executor.submit(process_video_job, job_id, upload_path, options, settings, job_store)
+            executor.submit(_run_encrypted_pipeline, process_video_job, job_id, upload_path, options, settings, job_store)
         else:
             options = {
                 "job_type": "ocr",
@@ -248,7 +323,7 @@ def create_app():
                 "lang": request.form.get("lang", "eng"),
             }
             access_token = job_store.create_job(job_id, filename, options)
-            executor.submit(process_job, job_id, upload_path, options, settings, job_store)
+            executor.submit(_run_encrypted_pipeline, process_job, job_id, upload_path, options, settings, job_store)
 
         # Store job in session for user access
         if "my_jobs" not in session:
@@ -340,9 +415,16 @@ def create_app():
             options["meta_subject"] = request.form.get("meta_subject", "")
             options["meta_keywords"] = request.form.get("meta_keywords", "")
 
+        # Encrypt uploaded files at rest
+        enc_key = _get_encryption_key()
+        if enc_key:
+            for path in saved_paths:
+                encrypt_file(path, enc_key)
+            key_store.store(job_id, enc_key)
+
         first_filename = secure_filename(files[0].filename)
         access_token = job_store.create_job(job_id, first_filename, options)
-        executor.submit(process_pdf_job, job_id, saved_paths, options, settings, job_store)
+        executor.submit(_run_encrypted_pipeline, process_pdf_job, job_id, saved_paths, options, settings, job_store)
 
         # Store job in session
         if "my_jobs" not in session:
@@ -404,6 +486,14 @@ def create_app():
             return jsonify({"status": job["status"]}), 202
         if not job["result_path"]:
             return jsonify({"error": "result not available"}), 404
+
+        enc_key = _get_encryption_key() or key_store.get(job_id)
+        if enc_key:
+            try:
+                plaintext = decrypt_file(job["result_path"], enc_key)
+                return jsonify(json.loads(plaintext))
+            except Exception:
+                return jsonify({"error": "file decryption failed — invalid or expired key"}), 403
         with open(job["result_path"], "r", encoding="utf-8") as handle:
             return jsonify(json.load(handle))
 
@@ -422,20 +512,20 @@ def create_app():
 
         if fmt == "txt":
             if job["text_path"] and os.path.exists(job["text_path"]):
-                return send_file(job["text_path"], as_attachment=True, download_name=f"{base_name}.txt")
+                return _send_encrypted_file(job["text_path"], f"{base_name}.txt", job_id)
             return jsonify({"error": "text file not available"}), 404
 
         if fmt == "json":
             if job["result_path"] and os.path.exists(job["result_path"]):
-                return send_file(job["result_path"], as_attachment=True, download_name=f"{base_name}.json")
+                return _send_encrypted_file(job["result_path"], f"{base_name}.json", job_id)
             return jsonify({"error": "json file not available"}), 404
 
         if fmt == "pdf":
             if job.get("pdf_path") and os.path.exists(job["pdf_path"]):
                 pdf_path = job["pdf_path"]
                 if pdf_path.endswith(".zip"):
-                    return send_file(pdf_path, as_attachment=True, download_name=f"{original_name}_split.zip")
-                return send_file(pdf_path, as_attachment=True, download_name=f"{base_name}.pdf")
+                    return _send_encrypted_file(pdf_path, f"{original_name}_split.zip", job_id)
+                return _send_encrypted_file(pdf_path, f"{base_name}.pdf", job_id)
             return jsonify({"error": "PDF not available for this processing mode"}), 404
 
         if fmt == "image":
@@ -448,7 +538,7 @@ def create_app():
             output_format = options.get("output_format", "png")
             original_name = os.path.splitext(job.get("filename", job_id))[0]
             download_name = f"{original_name}_converted.{output_format}"
-            return send_file(image_path, as_attachment=True, download_name=download_name)
+            return _send_encrypted_file(image_path, download_name, job_id)
 
         if fmt == "document":
             options = job.get("options", {})
@@ -460,7 +550,7 @@ def create_app():
             output_format = options.get("output_format", "pdf")
             original_name = os.path.splitext(job.get("filename", job_id))[0]
             download_name = f"{original_name}_converted.{output_format}"
-            return send_file(document_path, as_attachment=True, download_name=download_name)
+            return _send_encrypted_file(document_path, download_name, job_id)
 
         if fmt == "audio":
             options = job.get("options", {})
@@ -472,7 +562,7 @@ def create_app():
             output_format = options.get("output_format", "mp3")
             original_name = os.path.splitext(job.get("filename", job_id))[0]
             download_name = f"{original_name}_converted.{output_format}"
-            return send_file(audio_path, as_attachment=True, download_name=download_name)
+            return _send_encrypted_file(audio_path, download_name, job_id)
 
         if fmt == "video":
             options = job.get("options", {})
@@ -484,7 +574,7 @@ def create_app():
             output_format = options.get("output_format", "mp4")
             original_name = os.path.splitext(job.get("filename", job_id))[0]
             download_name = f"{original_name}_converted.{output_format}"
-            return send_file(video_path, as_attachment=True, download_name=download_name)
+            return _send_encrypted_file(video_path, download_name, job_id)
 
         return jsonify({"error": "unsupported format"}), 400
 

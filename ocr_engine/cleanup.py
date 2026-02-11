@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 logger = logging.getLogger(__name__)
 
 
-def _run_cleanup(settings, job_store):
+def _run_cleanup(settings, job_store, key_store=None):
     cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=settings.cleanup_ttl_hours)).isoformat()
     job_ids, db_paths = job_store.delete_expired_jobs(cutoff)
 
@@ -30,15 +30,19 @@ def _run_cleanup(settings, job_store):
             except OSError:
                 logger.warning("failed to remove %s", path)
 
+    # Free in-memory encryption keys for deleted jobs
+    if key_store and job_ids:
+        key_store.delete_many(job_ids)
+
     if job_ids:
         logger.info("cleanup: removed %d jobs, %d files", len(job_ids), removed)
 
 
-def start_cleanup_thread(settings, job_store):
+def start_cleanup_thread(settings, job_store, key_store=None):
     def loop():
         while True:
             try:
-                _run_cleanup(settings, job_store)
+                _run_cleanup(settings, job_store, key_store)
             except Exception:
                 logger.exception("cleanup error")
             event.wait(settings.cleanup_interval_minutes * 60)

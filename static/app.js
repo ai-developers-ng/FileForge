@@ -4,6 +4,57 @@
 const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
 
 // ============================================
+// Encryption Key Management
+// ============================================
+const getOrCreateEncryptionKey = async () => {
+  let keyB64 = sessionStorage.getItem("encryptionKey");
+  if (keyB64) return keyB64;
+
+  const key = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const raw = await crypto.subtle.exportKey("raw", key);
+  keyB64 = btoa(String.fromCharCode(...new Uint8Array(raw)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  sessionStorage.setItem("encryptionKey", keyB64);
+  return keyB64;
+};
+
+let encryptionKeyPromise = getOrCreateEncryptionKey();
+
+const encryptedDownload = async (url, filename) => {
+  const encKey = await encryptionKeyPromise;
+  const resp = await fetch(url, {
+    headers: { "X-Encryption-Key": encKey },
+  });
+  if (!resp.ok) {
+    alert("Download failed: " + (await resp.text()));
+    return;
+  }
+  const blob = await resp.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename || "download";
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(a.href);
+  a.remove();
+};
+
+// Intercept all download links to /api/jobs/*/download/*
+document.addEventListener("click", async (e) => {
+  const link = e.target.closest("a[href^='/api/jobs/']");
+  if (!link || !link.href.includes("/download/")) return;
+  e.preventDefault();
+  const filename = link.dataset.filename || link.textContent.trim() || "download";
+  await encryptedDownload(link.getAttribute("href"), filename);
+});
+
+// ============================================
 // SSE Helper - stream job progress with polling fallback
 // ============================================
 const streamJob = (jobId, token, onUpdate) => {
@@ -339,7 +390,10 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
           if (lastCompleted) {
             setActionState(jobMode, lastCompleted.jobId, lastCompleted.accessToken, true);
             try {
-              const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result?token=${encodeURIComponent(lastCompleted.accessToken)}`);
+              const ek = await encryptionKeyPromise;
+              const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result?token=${encodeURIComponent(lastCompleted.accessToken)}`, {
+                headers: { "X-Encryption-Key": ek },
+              });
               const result = await resultResponse.json();
               resultText.value = result.final_text || "No text extracted.";
             } catch {
@@ -352,7 +406,10 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
           const allTexts = [];
           for (const completedJob of completedJobs) {
             try {
-              const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result?token=${encodeURIComponent(completedJob.accessToken)}`);
+              const ek = await encryptionKeyPromise;
+              const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result?token=${encodeURIComponent(completedJob.accessToken)}`, {
+                headers: { "X-Encryption-Key": ek },
+              });
               const result = await resultResponse.json();
               if (result.final_text) {
                 allTexts.push(`--- ${completedJob.filename} ---\n${result.final_text}`);
@@ -430,9 +487,10 @@ const submitFiles = async () => {
     updateFilePillStatus(i, "Uploading...");
 
     try {
+      const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken },
+        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
         body: formData,
       });
       const payload = await response.json();
@@ -602,9 +660,10 @@ const submitImageFiles = async () => {
     updateImageFilePillStatus(i, "Uploading...");
 
     try {
+      const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken },
+        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
         body: formData,
       });
       const payload = await response.json();
@@ -846,9 +905,10 @@ const submitDocumentFiles = async () => {
     updateDocumentFilePillStatus(i, "Uploading...");
 
     try {
+      const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken },
+        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
         body: formData,
       });
       const payload = await response.json();
@@ -1008,9 +1068,10 @@ const submitAudioFiles = async () => {
     updateAudioFilePillStatus(i, "Uploading...");
 
     try {
+      const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken },
+        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
         body: formData,
       });
       const payload = await response.json();
@@ -1170,9 +1231,10 @@ const submitVideoFiles = async () => {
     updateVideoFilePillStatus(i, "Uploading...");
 
     try {
+      const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken },
+        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
         body: formData,
       });
       const payload = await response.json();
@@ -1496,9 +1558,10 @@ const submitPdfFiles = async () => {
   }
 
   try {
+    const encKey = await encryptionKeyPromise;
     const response = await fetch("/api/pdf-jobs", {
       method: "POST",
-      headers: { "X-CSRFToken": csrfToken },
+      headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
       body: formData,
     });
     const payload = await response.json();
