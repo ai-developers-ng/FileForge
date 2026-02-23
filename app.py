@@ -17,6 +17,7 @@ from flask_wtf.csrf import CSRFProtect
 from werkzeug.utils import secure_filename
 
 from ocr_engine.audio_pipeline import process_audio_job
+from ocr_engine.cache import OcrCache
 from ocr_engine.cleanup import start_cleanup_thread
 from ocr_engine.config import Settings
 from ocr_engine.crypto import KeyStore, decrypt_file, encrypt_file, decrypt_to_tempfile, key_from_b64
@@ -95,6 +96,15 @@ def create_app():
     executor = ThreadPoolExecutor(max_workers=settings.worker_count)
     _job_futures = {}       # job_id -> Future
     _cancel_events = {}     # job_id -> threading.Event
+    ocr_cache = (
+        OcrCache(
+            db_path=os.path.join(settings.data_dir, "ocr_cache.db"),
+            max_file_entries=settings.ocr_cache_max_file_entries,
+            max_page_entries=settings.ocr_cache_max_page_entries,
+        )
+        if settings.ocr_cache_enabled
+        else None
+    )
     start_cleanup_thread(settings, job_store, key_store)
 
     def _get_encryption_key():
@@ -118,9 +128,13 @@ def create_app():
                 return jsonify({"error": "file decryption failed — invalid or expired key"}), 403
         return send_file(file_path, as_attachment=True, download_name=download_name)
 
-    def _run_encrypted_pipeline(pipeline_fn, job_id, file_path_or_paths, options, settings, job_store, cancel_event=None):
+    def _run_encrypted_pipeline(pipeline_fn, job_id, file_path_or_paths, options, settings, job_store, cancel_event=None, cache=None):
         """Wrap a pipeline: decrypt inputs -> run -> encrypt outputs."""
-        extra = {"cancel_event": cancel_event} if cancel_event is not None else {}
+        extra = {}
+        if cancel_event is not None:
+            extra["cancel_event"] = cancel_event
+        if cache is not None:
+            extra["cache"] = cache
         enc_key = key_store.get(job_id)
         if not enc_key:
             if isinstance(file_path_or_paths, list):
@@ -350,7 +364,7 @@ def create_app():
             access_token = job_store.create_job(job_id, filename, options)
             cancel_event = threading.Event()
             _cancel_events[job_id] = cancel_event
-            future = executor.submit(_run_encrypted_pipeline, process_job, job_id, upload_path, options, settings, job_store, cancel_event)
+            future = executor.submit(_run_encrypted_pipeline, process_job, job_id, upload_path, options, settings, job_store, cancel_event, ocr_cache)
             _job_futures[job_id] = future
 
         # Store job in session for user access

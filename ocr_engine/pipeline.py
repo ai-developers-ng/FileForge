@@ -4,6 +4,7 @@ import traceback
 import logging
 from concurrent.futures import ThreadPoolExecutor as _PageExecutor, as_completed as _as_completed
 
+from .cache import OcrCache, hash_file, hash_image, hash_options, _PAGE_OPTS_KEYS, _FILE_OPTS_KEYS
 from .ocr import open_image, run_tesseract
 from .pdf_output import write_ocr_pdf_from_images, write_text_pdf
 from .storage import result_paths
@@ -14,19 +15,42 @@ logger = logging.getLogger(__name__)
 
 
 def _ocr_page_task(args):
-    """Parallel-safe per-page OCR worker.
+    """Parallel-safe per-page OCR worker with page-level cache support.
 
     Args:
-        args: tuple of (idx, image, engine, lang, psm, oem, preprocess)
+        args: tuple of (idx, image, engine, lang, psm, oem, preprocess,
+                        cache, page_opts_hash)
+              cache and page_opts_hash may both be None when caching is disabled.
 
     Returns:
         tuple of (idx, ocr_result_dict, error_msg_or_None)
     """
-    idx, image, engine, lang, psm, oem, preprocess = args
+    idx, image, engine, lang, psm, oem, preprocess, cache, page_opts_hash = args
+
+    # ── Page cache check ──────────────────────────────────────────────────────
+    image_hash = None
+    if cache is not None:
+        image_hash = hash_image(image)
+        cached = cache.get_page(image_hash, page_opts_hash)
+        if cached is not None:
+            logger.info("Page %d: cache HIT (skipping Tesseract)", idx)
+            return idx, cached, None
+
+    # ── Cache miss — run Tesseract ────────────────────────────────────────────
     local_errors = []
     local_result = {"errors": local_errors}
-    ocr_text = _run_ocr_engine(image, engine, local_result, lang=lang, psm=psm, oem=oem, preprocess=preprocess)
+    ocr_text = _run_ocr_engine(
+        image, engine, local_result,
+        lang=lang, psm=psm, oem=oem, preprocess=preprocess,
+    )
     error_msg = local_errors[0] if local_errors else None
+
+    # ── Store result in page cache ────────────────────────────────────────────
+    if cache is not None and not error_msg:
+        if image_hash is None:
+            image_hash = hash_image(image)
+        cache.set_page(image_hash, page_opts_hash, ocr_text)
+
     return idx, ocr_text, error_msg
 
 
@@ -93,20 +117,22 @@ def _pdf_to_images(file_path, batch_size=10, dpi=300):
     return all_images
 
 
-def process_job(job_id, file_path, options, settings, job_store, cancel_event=None):
+def process_job(job_id, file_path, options, settings, job_store, cancel_event=None, cache=None):
     """Process a document extraction job.
-    
+
     Modes:
     - 'text': Text extraction only (Tika), no OCR, no PDF output
     - 'ocr': OCR only, generates PDF with images + OCR layer, no text extraction
     - 'both': OCR + Text extraction, generates PDF and extracts text from it
-    
+
     Args:
         job_id: Unique job identifier
         file_path: Path to the uploaded file
         options: Processing options (mode, ocr_engine, etc.)
         settings: Application settings
         job_store: Job storage instance
+        cancel_event: Optional threading.Event for cooperative cancellation
+        cache: Optional OcrCache instance (None = caching disabled)
     """
     mode = options.get("mode", "text")
     ocr_engine = options.get("ocr_engine", "tesseract")
@@ -136,18 +162,47 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
         # Mode: 'text' - Text extraction only, no OCR
         if mode == "text":
             logger.info(f"Text-only mode for job {job_id}")
-            try:
-                tika = TikaClient(settings.tika_url)
-                result["tika_text"] = tika.extract_text(file_path)
-                result["metadata"] = tika.extract_metadata(file_path)
-                result["final_text"] = result["tika_text"]
-                logger.info(f"Tika extraction completed. Text length: {len(result['tika_text'])}")
-            except Exception as exc:
-                error_msg = f"Tika extraction failed: {exc}"
-                logger.error(error_msg, exc_info=True)
-                result["errors"].append(error_msg)
+
+            # ── File cache check (text mode) ──────────────────────────────────
+            file_hash = None
+            file_opts_hash = None
+            file_cache_hit = False
+            if cache is not None:
+                file_hash = hash_file(file_path)
+                file_opts_hash = hash_options(options, keys=_FILE_OPTS_KEYS)
+                cached = cache.get_file(file_hash, file_opts_hash)
+                if cached is not None:
+                    result["tika_text"] = cached.get("tika_text", "")
+                    result["metadata"] = cached.get("metadata", {})
+                    result["final_text"] = cached.get("final_text", "")
+                    logger.info(f"File cache HIT for job {job_id} (skipping Tika)")
+                    file_cache_hit = True
+
+            if not file_cache_hit:
+                try:
+                    tika = TikaClient(settings.tika_url)
+                    result["tika_text"] = tika.extract_text(file_path)
+                    result["metadata"] = tika.extract_metadata(file_path)
+                    result["final_text"] = result["tika_text"]
+                    logger.info(f"Tika extraction completed. Text length: {len(result['tika_text'])}")
+                except Exception as exc:
+                    error_msg = f"Tika extraction failed: {exc}"
+                    logger.error(error_msg, exc_info=True)
+                    result["errors"].append(error_msg)
+
+                # ── Cache successful extraction ────────────────────────────────
+                if cache is not None and not result["errors"]:
+                    if file_hash is None:
+                        file_hash = hash_file(file_path)
+                        file_opts_hash = hash_options(options, keys=_FILE_OPTS_KEYS)
+                    cache.set_file(file_hash, file_opts_hash, {
+                        "tika_text": result["tika_text"],
+                        "metadata": result["metadata"],
+                        "final_text": result["final_text"],
+                    })
+
             job_store.update_job(job_id, progress=100)
-            
+
             # Save results (no PDF generation for text-only mode)
             json_path, text_path, pdf_path = _persist_result(
                 result, settings.result_dir, job_id, ocr_images=[], generate_pdf=False
@@ -192,13 +247,20 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
                 import gc
                 total_pages = len(ocr_images)
                 page_workers = getattr(settings, "ocr_page_workers", 2)
+
+                # Compute a single options hash for all pages in this job
+                page_opts_hash = (
+                    hash_options(options, keys=_PAGE_OPTS_KEYS)
+                    if cache is not None else None
+                )
                 logger.info(
                     f"Starting parallel OCR: {total_pages} page(s), "
-                    f"{page_workers} worker(s) for job {job_id}"
+                    f"{page_workers} worker(s), cache={'on' if cache else 'off'} "
+                    f"for job {job_id}"
                 )
 
                 page_args_list = [
-                    (idx, image, ocr_engine, lang, psm, oem, preprocess)
+                    (idx, image, ocr_engine, lang, psm, oem, preprocess, cache, page_opts_hash)
                     for idx, image in enumerate(ocr_images, start=1)
                 ]
 

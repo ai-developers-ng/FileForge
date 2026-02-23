@@ -18,5 +18,12 @@ class Settings:
         # Phase 3 — intra-job page parallelism
         self.ocr_page_workers = int(os.environ.get("OCR_PAGE_WORKERS", "2"))
         self.ocr_batch_size = int(os.environ.get("OCR_BATCH_SIZE", "10"))
+        # Phase 5 — result caching
+        self.ocr_cache_enabled = (
+            os.environ.get("OCR_CACHE_ENABLED", "1").strip().lower()
+            not in ("0", "false", "no")
+        )
+        self.ocr_cache_max_file_entries = int(os.environ.get("OCR_CACHE_MAX_FILE_ENTRIES", "500"))
+        self.ocr_cache_max_page_entries = int(os.environ.get("OCR_CACHE_MAX_PAGE_ENTRIES", "10000"))
         # DEPRECATED: No longer used - mode selection is explicit (text/ocr/both)
         self.ocr_text_threshold = int(os.environ.get("OCR_TEXT_THRESHOLD", "50"))
