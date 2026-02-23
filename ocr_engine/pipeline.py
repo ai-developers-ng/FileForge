@@ -2,6 +2,7 @@ import mimetypes
 import os
 import traceback
 import logging
+from concurrent.futures import ThreadPoolExecutor as _PageExecutor, as_completed as _as_completed
 
 from .ocr import open_image, run_tesseract
 from .pdf_output import write_ocr_pdf_from_images, write_text_pdf
@@ -10,6 +11,23 @@ from .tika_client import TikaClient
 
 # Configure logger
 logger = logging.getLogger(__name__)
+
+
+def _ocr_page_task(args):
+    """Parallel-safe per-page OCR worker.
+
+    Args:
+        args: tuple of (idx, image, engine, lang, psm, oem, preprocess)
+
+    Returns:
+        tuple of (idx, ocr_result_dict, error_msg_or_None)
+    """
+    idx, image, engine, lang, psm, oem, preprocess = args
+    local_errors = []
+    local_result = {"errors": local_errors}
+    ocr_text = _run_ocr_engine(image, engine, local_result, lang=lang, psm=psm, oem=oem, preprocess=preprocess)
+    error_msg = local_errors[0] if local_errors else None
+    return idx, ocr_text, error_msg
 
 
 def _is_pdf(file_path):
@@ -144,7 +162,11 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
             if _is_pdf(file_path):
                 try:
                     logger.info(f"Converting PDF to images for job {job_id}")
-                    ocr_images = _pdf_to_images(file_path, dpi=getattr(settings, "ocr_dpi", 300))
+                    ocr_images = _pdf_to_images(
+                        file_path,
+                        batch_size=getattr(settings, "ocr_batch_size", 10),
+                        dpi=getattr(settings, "ocr_dpi", 300),
+                    )
                     logger.info(f"PDF converted to {len(ocr_images)} page(s)")
                 except ImportError as exc:
                     error_msg = "PDF rendering failed: Poppler is not installed. Please install poppler-utils (Linux/Windows) or poppler (macOS via Homebrew: brew install poppler)"
@@ -164,17 +186,62 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
             else:
                 result["errors"].append("Unsupported file type for OCR.")
             
-            # Run OCR on all images
+            # Run OCR on all images (parallel page workers)
             ocr_page_pdfs = []
             if ocr_images:
                 import gc
                 total_pages = len(ocr_images)
-                for idx, image in enumerate(ocr_images, start=1):
-                    if cancel_event and cancel_event.is_set():
-                        logger.info(f"Job {job_id} cancelled before page {idx}/{total_pages}")
-                        return
-                    logger.info(f"OCR processing page {idx}/{len(ocr_images)}")
-                    ocr_text = _run_ocr_engine(image, ocr_engine, result, lang=lang, psm=psm, oem=oem, preprocess=preprocess)
+                page_workers = getattr(settings, "ocr_page_workers", 2)
+                logger.info(
+                    f"Starting parallel OCR: {total_pages} page(s), "
+                    f"{page_workers} worker(s) for job {job_id}"
+                )
+
+                page_args_list = [
+                    (idx, image, ocr_engine, lang, psm, oem, preprocess)
+                    for idx, image in enumerate(ocr_images, start=1)
+                ]
+
+                page_results = {}  # idx -> (ocr_text_dict, error_msg)
+                completed_count = 0
+
+                with _PageExecutor(max_workers=page_workers) as page_exec:
+                    futures = {
+                        page_exec.submit(_ocr_page_task, args): args[0]
+                        for args in page_args_list
+                    }
+                    for future in _as_completed(futures):
+                        if cancel_event and cancel_event.is_set():
+                            logger.info(f"Job {job_id} cancelled during parallel OCR")
+                            for f in futures:
+                                f.cancel()
+                            return
+
+                        try:
+                            idx, ocr_text, error_msg = future.result()
+                        except Exception as exc:
+                            idx = futures[future]
+                            error_msg = f"Page {idx} OCR failed: {exc}"
+                            ocr_text = {"text": "", "engine": ocr_engine, "detail": {"error": str(exc)}}
+
+                        page_results[idx] = (ocr_text, error_msg)
+                        if error_msg:
+                            result["errors"].append(error_msg)
+
+                        completed_count += 1
+                        progress = int((completed_count / total_pages) * 100)
+                        job_store.update_job(job_id, progress=progress)
+                        logger.info(f"OCR page {idx}/{total_pages} done ({completed_count} completed)")
+
+                        if total_pages > 50 and completed_count % 10 == 0:
+                            gc.collect()
+                            logger.info(f"Memory cleanup after {completed_count} completed pages")
+
+                # Reassemble pages in document order
+                for idx in range(1, total_pages + 1):
+                    if idx not in page_results:
+                        continue
+                    ocr_text, _ = page_results[idx]
                     page_detail = ocr_text.get("detail", {}) or {}
                     page_pdf_bytes = page_detail.get("tesseract_pdf")
                     safe_detail = dict(page_detail)
@@ -183,17 +250,10 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
                         "page": idx,
                         "text": ocr_text["text"],
                         "engine": ocr_text["engine"],
-                        "detail": safe_detail
+                        "detail": safe_detail,
                     })
                     ocr_page_pdfs.append(page_pdf_bytes)
-                    progress = int((idx / total_pages) * 100)
-                    job_store.update_job(job_id, progress=progress)
 
-                    # Free memory after each page for large documents
-                    if total_pages > 50 and idx % 10 == 0:
-                        gc.collect()
-                        logger.info(f"Memory cleanup after page {idx}")
-                
                 result["ocr_text"] = "\n\n".join(page["text"] for page in result["pages"])
                 logger.info(f"OCR completed. Total text length: {len(result['ocr_text'])}")
                 
