@@ -5,8 +5,15 @@
 
 {% block content %}
 <div class="static-page">
-    <h1>Job History</h1>
-    <p class="page-subtitle">Recent processing jobs (last 50)</p>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+        <div>
+            <h1>Job History</h1>
+            <p class="page-subtitle">Recent processing jobs (last 50)</p>
+        </div>
+        {% if jobs %}
+        <button id="clearHistoryBtn" class="ghost btn" style="color:#dc2626;border-color:#dc2626;">Clear All History</button>
+        {% endif %}
+    </div>
 
     {% if jobs %}
     <div class="history-table-wrap">
@@ -121,6 +128,42 @@
     if (hasActive) {
         setTimeout(refreshActiveJobs, 2000);
     }
+})();
+
+// Clear All History
+(function () {
+    const btn = document.getElementById("clearHistoryBtn");
+    if (!btn) return;
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+
+    btn.addEventListener("click", async () => {
+        const confirmed = confirm(
+            "Clear all history?\n\nThis will permanently delete all uploaded files and processed results in your session. This cannot be undone."
+        );
+        if (!confirmed) return;
+
+        btn.disabled = true;
+        btn.textContent = "Clearing…";
+
+        try {
+            const res = await fetch("/api/history", {
+                method: "DELETE",
+                headers: { "X-CSRFToken": csrfToken },
+            });
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                alert("Failed to clear history: " + (data.error || res.statusText));
+                btn.disabled = false;
+                btn.textContent = "Clear All History";
+            }
+        } catch (err) {
+            alert("Network error: " + err.message);
+            btn.disabled = false;
+            btn.textContent = "Clear All History";
+        }
+    });
 })();
 </script>
 {% endblock %}

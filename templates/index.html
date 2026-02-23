@@ -45,15 +45,15 @@
                         <div class="pill-row">
                             <label class="pill">
                                 <input type="radio" name="mode" value="text" checked>
-                                Text extraction only
+                                Text Extraction Only
                             </label>
                             <label class="pill">
                                 <input type="radio" name="mode" value="ocr">
-                                PDF to OCRd PDF
+                                OCRd PDF
                             </label>
                             <label class="pill">
                                 <input type="radio" name="mode" value="both">
-                                OCR + Text extraction
+                                OCR + Text Extraction
                             </label>
                         </div>
                     </div>
@@ -127,6 +127,9 @@
                     <a class="ghost btn" id="downloadJson" href="#" aria-disabled="true">Download JSON</a>
                     <a class="ghost btn" id="downloadPdf" href="#" aria-disabled="true">Download PDF</a>
                     <button class="primary" id="copyText">Copy text</button>
+                </div>
+                <div style="margin-top:10px;">
+                    <button id="stopOcrJobs" class="ghost btn" style="display:none;color:#dc2626;border-color:#dc2626;">Stop Jobs</button>
                 </div>
             </aside>
         </div>
@@ -257,6 +260,9 @@
                         <p>Converted image preview will appear here.</p>
                     </div>
                 </div>
+                <div style="margin-top:10px;">
+                    <button id="stopImageJobs" class="ghost btn" style="display:none;color:#dc2626;border-color:#dc2626;">Stop Jobs</button>
+                </div>
             </aside>
         </div>
 
@@ -341,6 +347,9 @@
                     <div class="audio-preview-area" id="audioPreviewArea">
                         <p>Converted audio will be available for download.</p>
                     </div>
+                </div>
+                <div style="margin-top:10px;">
+                    <button id="stopAudioJobs" class="ghost btn" style="display:none;color:#dc2626;border-color:#dc2626;">Stop Jobs</button>
                 </div>
             </aside>
         </div>
@@ -427,6 +436,9 @@
                         <p>Converted video will be available for download.</p>
                     </div>
                 </div>
+                <div style="margin-top:10px;">
+                    <button id="stopVideoJobs" class="ghost btn" style="display:none;color:#dc2626;border-color:#dc2626;">Stop Jobs</button>
+                </div>
             </aside>
         </div>
 
@@ -499,6 +511,9 @@
                     <div class="document-preview-area" id="documentPreviewArea">
                         <p>Converted document will be available for download.</p>
                     </div>
+                </div>
+                <div style="margin-top:10px;">
+                    <button id="stopDocumentJobs" class="ghost btn" style="display:none;color:#dc2626;border-color:#dc2626;">Stop Jobs</button>
                 </div>
             </aside>
         </div>

@@ -238,7 +238,7 @@ const getDisabledReason = (mode, action, ready) => {
   if (ready) return "";
   const availability = getAvailabilityForMode(mode);
   if (!availability[action]) {
-    if (action === "pdf") return "Run PDF to OCRd PDF or OCR + Text extraction.";
+    if (action === "pdf") return "Run OCRd PDF or OCR + Text extraction.";
     if (action === "txt" || action === "copy") {
       return "Run Text extraction or OCR + Text extraction.";
     }
@@ -346,17 +346,22 @@ const calculateOverallProgress = () => {
 const updateOverallStatus = () => {
   const completed = activeJobs.filter((j) => j.status === "completed").length;
   const failed = activeJobs.filter((j) => j.status === "failed").length;
+  const cancelled = activeJobs.filter((j) => j.status === "cancelled").length;
+  const terminal = completed + failed + cancelled;
   const total = activeJobs.length;
 
-  if (completed + failed === total) {
-    if (failed > 0) {
-      setStatus(`Completed: ${completed}/${total} (${failed} failed)`);
-    } else {
-      setStatus(`All ${total} file(s) completed.`);
-    }
-    setResultMeta(`${completed} file(s) processed`, "Done");
+  const stopBtn = document.getElementById("stopOcrJobs");
+  if (stopBtn) stopBtn.style.display = terminal < total && total > 0 ? "inline-block" : "none";
+
+  if (terminal === total && total > 0) {
+    const parts = [];
+    if (completed > 0) parts.push(`${completed} completed`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    if (cancelled > 0) parts.push(`${cancelled} cancelled`);
+    setStatus(parts.join(", ") + ".");
+    setResultMeta(`${completed} file(s) processed`, completed > 0 ? "Done" : "Cancelled");
   } else {
-    const processing = total - completed - failed;
+    const processing = total - terminal;
     setStatus(`Processing ${processing} of ${total} file(s)...`);
     setResultMeta(`${completed}/${total} completed`, "Running");
   }
@@ -369,7 +374,8 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
 
-    activeJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
+    const isTerminal = ["completed", "failed", "cancelled"].includes(job.status);
+    activeJobs[jobIndex].progress = isTerminal ? 100 : progress;
     activeJobs[jobIndex].status = job.status;
     activeJobs[jobIndex].result = job;
 
@@ -377,13 +383,15 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
       updateFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateFilePillStatus(jobIndex, "Failed");
+    } else if (job.status === "cancelled") {
+      updateFilePillStatus(jobIndex, "Cancelled");
     } else {
       updateFilePillStatus(jobIndex, `${progress}%`);
     }
 
     updateOverallStatus();
 
-    if (job.status === "completed" || job.status === "failed") {
+    if (isTerminal) {
       (async () => {
         if (activeJobs.length === 1) {
           const lastCompleted = activeJobs.find((j) => j.status === "completed");
@@ -432,7 +440,7 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
     es.onmessage = (event) => {
       const data = JSON.parse(event.data);
       onUpdate(data);
-      if (data.status === "completed" || data.status === "failed") {
+      if (["completed", "failed", "cancelled"].includes(data.status)) {
         es.close();
       }
     };
@@ -443,7 +451,7 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
         const response = await fetch(`/api/jobs/${jobId}?token=${encodeURIComponent(accessToken)}`);
         const job = await response.json();
         onUpdate(job);
-        if (job.status !== "completed" && job.status !== "failed") {
+        if (!["completed", "failed", "cancelled"].includes(job.status)) {
           setTimeout(poll, 2000);
         }
       };
@@ -454,7 +462,7 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
       const response = await fetch(`/api/jobs/${jobId}`);
       const job = await response.json();
       onUpdate(job);
-      if (job.status !== "completed" && job.status !== "failed") {
+      if (!["completed", "failed", "cancelled"].includes(job.status)) {
         setTimeout(poll, 2000);
       }
     };
@@ -594,17 +602,18 @@ const calculateImageOverallProgress = () => {
 const updateImageOverallStatus = () => {
   const completed = activeImageJobs.filter((j) => j.status === "completed").length;
   const failed = activeImageJobs.filter((j) => j.status === "failed").length;
+  const cancelled = activeImageJobs.filter((j) => j.status === "cancelled").length;
+  const terminal = completed + failed + cancelled;
   const total = activeImageJobs.length;
 
-  if (completed + failed === total) {
-    if (failed > 0) {
-      setImageStatus(`Completed: ${completed}/${total} (${failed} failed)`);
-    } else {
-      setImageStatus(`All ${total} image(s) converted.`);
-    }
-    setImageResultMeta(`${completed} image(s) processed`, "Done");
+  const stopBtn = document.getElementById("stopImageJobs");
+  if (stopBtn) stopBtn.style.display = terminal < total && total > 0 ? "inline-block" : "none";
+
+  if (terminal === total && total > 0) {
+    setImageStatus(`${completed} converted, ${failed} failed, ${cancelled} cancelled.`);
+    setImageResultMeta(`${completed} image(s) processed`, completed > 0 ? "Done" : "Cancelled");
   } else {
-    const processing = total - completed - failed;
+    const processing = total - terminal;
     setImageStatus(`Converting ${processing} of ${total} image(s)...`);
     setImageResultMeta(`${completed}/${total} completed`, "Running");
   }
@@ -616,13 +625,16 @@ const pollImageJob = (jobIndex, jobId, accessToken) => {
   streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-    activeImageJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
+    const isTerminal = ["completed", "failed", "cancelled"].includes(job.status);
+    activeImageJobs[jobIndex].progress = isTerminal ? 100 : progress;
     activeImageJobs[jobIndex].status = job.status;
     activeImageJobs[jobIndex].result = job;
     if (job.status === "completed") {
       updateImageFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateImageFilePillStatus(jobIndex, "Failed");
+    } else if (job.status === "cancelled") {
+      updateImageFilePillStatus(jobIndex, "Cancelled");
     } else {
       updateImageFilePillStatus(jobIndex, `${progress}%`);
     }
@@ -707,6 +719,34 @@ const submitImageFiles = async () => {
 };
 
 // ============================================
+// Stop Jobs — shared utility
+// ============================================
+const stopJobs = async (jobs, pillStatusFn) => {
+  const confirmed = confirm(
+    "Stop all running jobs?\n\nThis will delete all uploaded files and partial results immediately. This cannot be undone."
+  );
+  if (!confirmed) return;
+
+  const toStop = jobs.filter(
+    (j) => j.jobId && !["completed", "failed", "cancelled"].includes(j.status)
+  );
+
+  for (const job of toStop) {
+    try {
+      await fetch(
+        `/api/jobs/${job.jobId}?token=${encodeURIComponent(job.accessToken)}`,
+        { method: "DELETE", headers: { "X-CSRFToken": csrfToken } }
+      );
+    } catch {
+      // best-effort — server may already have cleaned up
+    }
+    job.status = "cancelled";
+    job.progress = 100;
+    if (pillStatusFn) pillStatusFn(job.fileIndex, "Cancelled");
+  }
+};
+
+// ============================================
 // OCR Tab Event Listeners
 // ============================================
 dropzone?.addEventListener("dragover", (event) => {
@@ -745,6 +785,11 @@ uploadForm?.querySelectorAll("input[name='mode']").forEach((radio) => {
     setActionState(getSelectedMode(), null, false);
     setProgress(0);
   });
+});
+
+document.getElementById("stopOcrJobs")?.addEventListener("click", async () => {
+  await stopJobs(activeJobs, updateFilePillStatus);
+  updateOverallStatus();
 });
 
 // ============================================
@@ -786,6 +831,11 @@ brightnessSlider?.addEventListener("input", (e) => {
 
 contrastSlider?.addEventListener("input", (e) => {
   if (contrastValue) contrastValue.textContent = e.target.value;
+});
+
+document.getElementById("stopImageJobs")?.addEventListener("click", async () => {
+  await stopJobs(activeImageJobs, updateImageFilePillStatus);
+  updateImageOverallStatus();
 });
 
 // ============================================
@@ -849,17 +899,18 @@ const calculateDocumentOverallProgress = () => {
 const updateDocumentOverallStatus = () => {
   const completed = activeDocumentJobs.filter((j) => j.status === "completed").length;
   const failed = activeDocumentJobs.filter((j) => j.status === "failed").length;
+  const cancelled = activeDocumentJobs.filter((j) => j.status === "cancelled").length;
+  const terminal = completed + failed + cancelled;
   const total = activeDocumentJobs.length;
 
-  if (completed + failed === total) {
-    if (failed > 0) {
-      setDocumentStatus(`Completed: ${completed}/${total} (${failed} failed)`);
-    } else {
-      setDocumentStatus(`All ${total} document(s) converted.`);
-    }
-    setDocumentResultMeta(`${completed} document(s) processed`, "Done");
+  const stopBtn = document.getElementById("stopDocumentJobs");
+  if (stopBtn) stopBtn.style.display = terminal < total && total > 0 ? "inline-block" : "none";
+
+  if (terminal === total && total > 0) {
+    setDocumentStatus(`${completed} converted, ${failed} failed, ${cancelled} cancelled.`);
+    setDocumentResultMeta(`${completed} document(s) processed`, completed > 0 ? "Done" : "Cancelled");
   } else {
-    const processing = total - completed - failed;
+    const processing = total - terminal;
     setDocumentStatus(`Converting ${processing} of ${total} document(s)...`);
     setDocumentResultMeta(`${completed}/${total} completed`, "Running");
   }
@@ -871,13 +922,16 @@ const pollDocumentJob = (jobIndex, jobId, accessToken) => {
   streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-    activeDocumentJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
+    const isTerminal = ["completed", "failed", "cancelled"].includes(job.status);
+    activeDocumentJobs[jobIndex].progress = isTerminal ? 100 : progress;
     activeDocumentJobs[jobIndex].status = job.status;
     activeDocumentJobs[jobIndex].result = job;
     if (job.status === "completed") {
       updateDocumentFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateDocumentFilePillStatus(jobIndex, "Failed");
+    } else if (job.status === "cancelled") {
+      updateDocumentFilePillStatus(jobIndex, "Cancelled");
     } else {
       updateDocumentFilePillStatus(jobIndex, `${progress}%`);
     }
@@ -1012,17 +1066,18 @@ const calculateAudioOverallProgress = () => {
 const updateAudioOverallStatus = () => {
   const completed = activeAudioJobs.filter((j) => j.status === "completed").length;
   const failed = activeAudioJobs.filter((j) => j.status === "failed").length;
+  const cancelled = activeAudioJobs.filter((j) => j.status === "cancelled").length;
+  const terminal = completed + failed + cancelled;
   const total = activeAudioJobs.length;
 
-  if (completed + failed === total) {
-    if (failed > 0) {
-      setAudioStatus(`Completed: ${completed}/${total} (${failed} failed)`);
-    } else {
-      setAudioStatus(`All ${total} audio file(s) converted.`);
-    }
-    setAudioResultMeta(`${completed} audio file(s) processed`, "Done");
+  const stopBtn = document.getElementById("stopAudioJobs");
+  if (stopBtn) stopBtn.style.display = terminal < total && total > 0 ? "inline-block" : "none";
+
+  if (terminal === total && total > 0) {
+    setAudioStatus(`${completed} converted, ${failed} failed, ${cancelled} cancelled.`);
+    setAudioResultMeta(`${completed} audio file(s) processed`, completed > 0 ? "Done" : "Cancelled");
   } else {
-    const processing = total - completed - failed;
+    const processing = total - terminal;
     setAudioStatus(`Converting ${processing} of ${total} audio file(s)...`);
     setAudioResultMeta(`${completed}/${total} completed`, "Running");
   }
@@ -1034,13 +1089,16 @@ const pollAudioJob = (jobIndex, jobId, accessToken) => {
   streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-    activeAudioJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
+    const isTerminal = ["completed", "failed", "cancelled"].includes(job.status);
+    activeAudioJobs[jobIndex].progress = isTerminal ? 100 : progress;
     activeAudioJobs[jobIndex].status = job.status;
     activeAudioJobs[jobIndex].result = job;
     if (job.status === "completed") {
       updateAudioFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateAudioFilePillStatus(jobIndex, "Failed");
+    } else if (job.status === "cancelled") {
+      updateAudioFilePillStatus(jobIndex, "Cancelled");
     } else {
       updateAudioFilePillStatus(jobIndex, `${progress}%`);
     }
@@ -1175,17 +1233,18 @@ const calculateVideoOverallProgress = () => {
 const updateVideoOverallStatus = () => {
   const completed = activeVideoJobs.filter((j) => j.status === "completed").length;
   const failed = activeVideoJobs.filter((j) => j.status === "failed").length;
+  const cancelled = activeVideoJobs.filter((j) => j.status === "cancelled").length;
+  const terminal = completed + failed + cancelled;
   const total = activeVideoJobs.length;
 
-  if (completed + failed === total) {
-    if (failed > 0) {
-      setVideoStatus(`Completed: ${completed}/${total} (${failed} failed)`);
-    } else {
-      setVideoStatus(`All ${total} video(s) converted.`);
-    }
-    setVideoResultMeta(`${completed} video(s) processed`, "Done");
+  const stopBtn = document.getElementById("stopVideoJobs");
+  if (stopBtn) stopBtn.style.display = terminal < total && total > 0 ? "inline-block" : "none";
+
+  if (terminal === total && total > 0) {
+    setVideoStatus(`${completed} converted, ${failed} failed, ${cancelled} cancelled.`);
+    setVideoResultMeta(`${completed} video(s) processed`, completed > 0 ? "Done" : "Cancelled");
   } else {
-    const processing = total - completed - failed;
+    const processing = total - terminal;
     setVideoStatus(`Converting ${processing} of ${total} video(s)...`);
     setVideoResultMeta(`${completed}/${total} completed`, "Running");
   }
@@ -1197,13 +1256,16 @@ const pollVideoJob = (jobIndex, jobId, accessToken) => {
   streamJob(jobId, accessToken, (job) => {
     const progress =
       typeof job.progress === "number" ? Math.min(100, Math.max(0, job.progress)) : 0;
-    activeVideoJobs[jobIndex].progress = job.status === "completed" || job.status === "failed" ? 100 : progress;
+    const isTerminal = ["completed", "failed", "cancelled"].includes(job.status);
+    activeVideoJobs[jobIndex].progress = isTerminal ? 100 : progress;
     activeVideoJobs[jobIndex].status = job.status;
     activeVideoJobs[jobIndex].result = job;
     if (job.status === "completed") {
       updateVideoFilePillStatus(jobIndex, "Done", jobId, accessToken);
     } else if (job.status === "failed") {
       updateVideoFilePillStatus(jobIndex, "Failed");
+    } else if (job.status === "cancelled") {
+      updateVideoFilePillStatus(jobIndex, "Cancelled");
     } else {
       updateVideoFilePillStatus(jobIndex, `${progress}%`);
     }
@@ -1305,6 +1367,11 @@ documentUploadForm?.addEventListener("submit", async (event) => {
   await submitDocumentFiles();
 });
 
+document.getElementById("stopDocumentJobs")?.addEventListener("click", async () => {
+  await stopJobs(activeDocumentJobs, updateDocumentFilePillStatus);
+  updateDocumentOverallStatus();
+});
+
 // ============================================
 // Audio Converter Tab Event Listeners
 // ============================================
@@ -1333,6 +1400,11 @@ audioUploadForm?.addEventListener("submit", async (event) => {
   await submitAudioFiles();
 });
 
+document.getElementById("stopAudioJobs")?.addEventListener("click", async () => {
+  await stopJobs(activeAudioJobs, updateAudioFilePillStatus);
+  updateAudioOverallStatus();
+});
+
 // ============================================
 // Video Converter Tab Event Listeners
 // ============================================
@@ -1359,6 +1431,11 @@ videoFileInput?.addEventListener("change", (event) => {
 videoUploadForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   await submitVideoFiles();
+});
+
+document.getElementById("stopVideoJobs")?.addEventListener("click", async () => {
+  await stopJobs(activeVideoJobs, updateVideoFilePillStatus);
+  updateVideoOverallStatus();
 });
 
 // ============================================

@@ -173,6 +173,28 @@ class JobStore:
             paths.extend(p for p in row[1:] if p)
         return [r[0] for r in rows], paths
 
+    def delete_jobs_by_ids(self, job_ids):
+        """Delete specific jobs by ID and return their file paths for cleanup."""
+        if not job_ids:
+            return [], []
+        placeholders = ",".join("?" * len(job_ids))
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                f"select id, result_path, text_path, pdf_path, image_path, document_path, audio_path, video_path "
+                f"from jobs where id in ({placeholders})",
+                job_ids,
+            ).fetchall()
+            if rows:
+                ids = [r[0] for r in rows]
+                conn.execute(
+                    f"delete from jobs where id in ({','.join('?' * len(ids))})",
+                    ids,
+                )
+        paths = []
+        for row in rows:
+            paths.extend(p for p in row[1:] if p)
+        return [r[0] for r in rows], paths
+
     def list_recent_jobs(self, limit=50, session_id=None):
         with self._lock, self._connect() as conn:
             if session_id:

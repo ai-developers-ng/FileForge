@@ -9,7 +9,7 @@ Full-featured Flask app for document text extraction, image conversion, document
 - **Multiple file upload** support with individual progress tracking
 - Three distinct processing modes:
   - **Text extraction only**: Extract embedded text (no OCR, no PDF output)
-  - **PDF to OCRd PDF**: Create searchable PDFs with original document appearance
+  - **OCRd PDF**: Create searchable PDFs with original document appearance
   - **OCR + Text extraction**: Create searchable PDFs AND extract plain text
 - Job queue with status polling and downloadable results
 - Download results as TXT, JSON, or PDF
@@ -173,7 +173,7 @@ Environment variables:
 2. Upload one or more files (PDF, PNG, JPG, TIFF, BMP)
 3. Select processing mode:
    - **Text extraction only**: Fast extraction of embedded text
-   - **PDF to OCRd PDF**: Create searchable PDF
+   - **OCRd PDF**: Create searchable PDF
    - **OCR + Text extraction**: Both searchable PDF and text file
 4. Click "RUN"
 5. Download results individually or view combined text

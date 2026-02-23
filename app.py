@@ -1,7 +1,9 @@
+import glob
 import io
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -91,6 +93,8 @@ def create_app():
     job_store = JobStore(settings.db_path)
     key_store = KeyStore()
     executor = ThreadPoolExecutor(max_workers=settings.worker_count)
+    _job_futures = {}       # job_id -> Future
+    _cancel_events = {}     # job_id -> threading.Event
     start_cleanup_thread(settings, job_store, key_store)
 
     def _get_encryption_key():
@@ -114,13 +118,14 @@ def create_app():
                 return jsonify({"error": "file decryption failed — invalid or expired key"}), 403
         return send_file(file_path, as_attachment=True, download_name=download_name)
 
-    def _run_encrypted_pipeline(pipeline_fn, job_id, file_path_or_paths, options, settings, job_store):
+    def _run_encrypted_pipeline(pipeline_fn, job_id, file_path_or_paths, options, settings, job_store, cancel_event=None):
         """Wrap a pipeline: decrypt inputs -> run -> encrypt outputs."""
+        extra = {"cancel_event": cancel_event} if cancel_event is not None else {}
         enc_key = key_store.get(job_id)
         if not enc_key:
             if isinstance(file_path_or_paths, list):
-                return pipeline_fn(job_id, file_path_or_paths, options, settings, job_store)
-            return pipeline_fn(job_id, file_path_or_paths, options, settings, job_store)
+                return pipeline_fn(job_id, file_path_or_paths, options, settings, job_store, **extra)
+            return pipeline_fn(job_id, file_path_or_paths, options, settings, job_store, **extra)
 
         temp_paths = []
         try:
@@ -131,12 +136,12 @@ def create_app():
                     tmp = decrypt_to_tempfile(fp, enc_key, suffix=ext)
                     temp_paths.append(tmp)
                     decrypted.append(tmp)
-                pipeline_fn(job_id, decrypted, options, settings, job_store)
+                pipeline_fn(job_id, decrypted, options, settings, job_store, **extra)
             else:
                 ext = os.path.splitext(file_path_or_paths)[1]
                 tmp = decrypt_to_tempfile(file_path_or_paths, enc_key, suffix=ext)
                 temp_paths.append(tmp)
-                pipeline_fn(job_id, tmp, options, settings, job_store)
+                pipeline_fn(job_id, tmp, options, settings, job_store, **extra)
 
             # Encrypt all output files
             job = job_store.get_job(job_id)
@@ -155,6 +160,23 @@ def create_app():
                         os.remove(tmp)
                 except OSError:
                     pass
+
+    def _cleanup_job_files(job_id, job):
+        """Delete all on-disk artefacts for a job (upload + results + enc key)."""
+        for field in ("result_path", "text_path", "pdf_path",
+                      "image_path", "document_path", "audio_path", "video_path"):
+            path = job.get(field)
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        for path in glob.glob(os.path.join(settings.upload_dir, f"{job_id}-*")):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        key_store.delete(job_id)
 
     @app.before_request
     def ensure_session_id():
@@ -321,9 +343,15 @@ def create_app():
                 "mode": request.form.get("mode", "text"),
                 "ocr_engine": request.form.get("ocr_engine", "tesseract"),
                 "lang": request.form.get("lang", "eng"),
+                "psm": request.form.get("psm", "6"),
+                "oem": request.form.get("oem", "1"),
+                "preprocess": request.form.get("preprocess", "standard"),
             }
             access_token = job_store.create_job(job_id, filename, options)
-            executor.submit(_run_encrypted_pipeline, process_job, job_id, upload_path, options, settings, job_store)
+            cancel_event = threading.Event()
+            _cancel_events[job_id] = cancel_event
+            future = executor.submit(_run_encrypted_pipeline, process_job, job_id, upload_path, options, settings, job_store, cancel_event)
+            _job_futures[job_id] = future
 
         # Store job in session for user access
         if "my_jobs" not in session:
@@ -444,6 +472,66 @@ def create_app():
             return jsonify({"error": "job not found or access denied"}), 404
         return jsonify(job)
 
+    @app.route("/api/jobs/<job_id>", methods=["DELETE"])
+    def cancel_job(job_id):
+        token = request.args.get("token") or request.headers.get("X-Access-Token")
+        if not token:
+            return jsonify({"error": "access denied: token required"}), 403
+        job = job_store.get_job(job_id, access_token=token)
+        if not job:
+            return jsonify({"error": "job not found or access denied"}), 404
+        if job["status"] in ("completed", "failed", "cancelled"):
+            return jsonify({"error": f"job already {job['status']}"}), 409
+
+        # Signal the running pipeline to stop at the next page boundary
+        event = _cancel_events.get(job_id)
+        if event:
+            event.set()
+
+        # Cancel if still queued (returns True) or silently no-ops if running
+        future = _job_futures.pop(job_id, None)
+        if future:
+            future.cancel()
+
+        job_store.update_job(job_id, status="cancelled", progress=100, error="Cancelled by user")
+        _cleanup_job_files(job_id, job)
+        _cancel_events.pop(job_id, None)
+
+        return jsonify({"status": "cancelled"})
+
+    @app.route("/api/history", methods=["DELETE"])
+    def clear_history():
+        my_jobs_data = session.get("my_jobs", [])
+        if not my_jobs_data:
+            session["my_jobs"] = []
+            return jsonify({"cleared": 0})
+
+        for job_data in my_jobs_data:
+            job_id = job_data["job_id"]
+            token = job_data["token"]
+
+            # Signal any running jobs to stop
+            event = _cancel_events.pop(job_id, None)
+            if event:
+                event.set()
+            future = _job_futures.pop(job_id, None)
+            if future:
+                future.cancel()
+
+            # Delete uploaded and result files
+            job = job_store.get_job(job_id, access_token=token)
+            if job:
+                _cleanup_job_files(job_id, job)
+
+        # Remove all jobs from DB and clear session
+        job_ids = [j["job_id"] for j in my_jobs_data]
+        job_store.delete_jobs_by_ids(job_ids)
+        session["my_jobs"] = []
+        session.modified = True
+
+        logger.info(f"Cleared {len(job_ids)} history job(s) for session")
+        return jsonify({"cleared": len(job_ids)})
+
     @app.route("/api/jobs/<job_id>/stream", methods=["GET"])
     def stream_job(job_id):
         token = request.args.get("token") or request.headers.get("X-Access-Token")
@@ -462,7 +550,7 @@ def create_app():
                     "error": job.get("error"),
                 }
                 yield f"data: {json.dumps(payload)}\n\n"
-                if job["status"] in ("completed", "failed"):
+                if job["status"] in ("completed", "failed", "cancelled"):
                     return
                 time.sleep(1)
 

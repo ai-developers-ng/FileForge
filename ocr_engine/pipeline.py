@@ -21,7 +21,7 @@ def _is_image(file_path):
     return mime.startswith("image/")
 
 
-def _pdf_to_images(file_path, batch_size=10):
+def _pdf_to_images(file_path, batch_size=10, dpi=300):
     """Convert PDF to images in batches to reduce memory usage.
 
     For large PDFs, processing all pages at once can cause OOM errors.
@@ -30,6 +30,7 @@ def _pdf_to_images(file_path, batch_size=10):
     Args:
         file_path: Path to the PDF file
         batch_size: Number of pages to process in each batch (default: 10)
+        dpi: Resolution for rendering (default: 300 — optimal for Tesseract accuracy)
 
     Returns:
         List of PIL Image objects
@@ -41,14 +42,14 @@ def _pdf_to_images(file_path, batch_size=10):
     try:
         info = pdfinfo_from_path(file_path)
         total_pages = info.get('Pages', 0)
-        logger.info(f"PDF has {total_pages} pages, will process in batches of {batch_size}")
+        logger.info(f"PDF has {total_pages} pages, will process in batches of {batch_size} at {dpi} DPI")
     except Exception as e:
         logger.warning(f"Could not get page count, processing all at once: {e}")
-        return convert_from_path(file_path)
+        return convert_from_path(file_path, dpi=dpi)
 
     # If small PDF, process all at once
     if total_pages <= batch_size:
-        return convert_from_path(file_path)
+        return convert_from_path(file_path, dpi=dpi)
 
     # Process in batches for large PDFs
     all_images = []
@@ -60,7 +61,8 @@ def _pdf_to_images(file_path, batch_size=10):
             batch_images = convert_from_path(
                 file_path,
                 first_page=start_page,
-                last_page=end_page
+                last_page=end_page,
+                dpi=dpi,
             )
             all_images.extend(batch_images)
 
@@ -73,7 +75,7 @@ def _pdf_to_images(file_path, batch_size=10):
     return all_images
 
 
-def process_job(job_id, file_path, options, settings, job_store):
+def process_job(job_id, file_path, options, settings, job_store, cancel_event=None):
     """Process a document extraction job.
     
     Modes:
@@ -91,6 +93,9 @@ def process_job(job_id, file_path, options, settings, job_store):
     mode = options.get("mode", "text")
     ocr_engine = options.get("ocr_engine", "tesseract")
     lang = options.get("lang", "eng")
+    psm = int(options.get("psm", 6))
+    oem = int(options.get("oem", 1))
+    preprocess = options.get("preprocess", "standard")
     
     logger.info(f"Processing job {job_id}: file={os.path.basename(file_path)}, "
                f"mode={mode}, ocr_engine={ocr_engine}")
@@ -139,7 +144,7 @@ def process_job(job_id, file_path, options, settings, job_store):
             if _is_pdf(file_path):
                 try:
                     logger.info(f"Converting PDF to images for job {job_id}")
-                    ocr_images = _pdf_to_images(file_path)
+                    ocr_images = _pdf_to_images(file_path, dpi=getattr(settings, "ocr_dpi", 300))
                     logger.info(f"PDF converted to {len(ocr_images)} page(s)")
                 except ImportError as exc:
                     error_msg = "PDF rendering failed: Poppler is not installed. Please install poppler-utils (Linux/Windows) or poppler (macOS via Homebrew: brew install poppler)"
@@ -165,8 +170,11 @@ def process_job(job_id, file_path, options, settings, job_store):
                 import gc
                 total_pages = len(ocr_images)
                 for idx, image in enumerate(ocr_images, start=1):
+                    if cancel_event and cancel_event.is_set():
+                        logger.info(f"Job {job_id} cancelled before page {idx}/{total_pages}")
+                        return
                     logger.info(f"OCR processing page {idx}/{len(ocr_images)}")
-                    ocr_text = _run_ocr_engine(image, ocr_engine, result, lang=lang)
+                    ocr_text = _run_ocr_engine(image, ocr_engine, result, lang=lang, psm=psm, oem=oem, preprocess=preprocess)
                     page_detail = ocr_text.get("detail", {}) or {}
                     page_pdf_bytes = page_detail.get("tesseract_pdf")
                     safe_detail = dict(page_detail)
@@ -239,7 +247,7 @@ def process_job(job_id, file_path, options, settings, job_store):
         )
 
 
-def _run_ocr_engine(image, engine, result, lang="eng"):
+def _run_ocr_engine(image, engine, result, lang="eng", psm=6, oem=1, preprocess="standard"):
     """Run OCR engine on an image with error handling and logging.
 
     Args:
@@ -247,16 +255,19 @@ def _run_ocr_engine(image, engine, result, lang="eng"):
         engine: OCR engine name ('tesseract' only)
         result: Result dictionary to append errors to
         lang: Tesseract language code
+        psm: Tesseract page segmentation mode (default: 6)
+        oem: Tesseract OCR engine mode (default: 1 — LSTM only)
+        preprocess: Image preprocessing profile ("none", "standard", "aggressive")
 
     Returns:
         Dictionary with 'text', 'engine', and 'detail' keys
     """
     try:
-        logger.info(f"Running OCR with engine: {engine}, lang: {lang}")
+        logger.info(f"Running OCR with engine: {engine}, lang: {lang}, psm: {psm}, oem: {oem}, preprocess: {preprocess}")
 
         if engine != "tesseract":
             raise ValueError(f"Unsupported OCR engine: {engine}")
-        ocr_result = run_tesseract(image, lang=lang)
+        ocr_result = run_tesseract(image, lang=lang, psm=psm, oem=oem, preprocess=preprocess)
         
         result_dict = ocr_result.__dict__
         logger.info(f"OCR completed. Engine: {engine}, Text length: {len(result_dict['text'])}, "

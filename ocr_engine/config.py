@@ -14,5 +14,6 @@ class Settings:
         self.cleanup_ttl_hours = int(os.environ.get("CLEANUP_TTL_HOURS", "24"))
         self.cleanup_interval_minutes = int(os.environ.get("CLEANUP_INTERVAL_MINUTES", "30"))
         self.worker_count = int(os.environ.get("WORKER_COUNT", "2"))
+        self.ocr_dpi = int(os.environ.get("OCR_DPI", "300"))
         # DEPRECATED: No longer used - mode selection is explicit (text/ocr/both)
         self.ocr_text_threshold = int(os.environ.get("OCR_TEXT_THRESHOLD", "50"))

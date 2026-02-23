@@ -15,3 +15,4 @@ flask-compress==1.17
 Flask-WTF==1.2.2
 python-magic==0.4.27
 cryptography>=42.0.0
+python-dotenv
