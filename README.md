@@ -1,6 +1,6 @@
-# OCR Engine
+# FileForge
 
-Full-featured Flask app for document text extraction, image conversion, document format conversion, audio conversion, and video conversion. Supports OCR via Tesseract, image processing via ImageMagick, document conversion via Pandoc, and audio/video conversion via FFmpeg.
+Full-featured Flask application for document text extraction, image conversion, document format conversion, audio/video conversion, and OCR. Powered by Tesseract, ImageMagick, Pandoc, FFmpeg, and optional Apache Tika. Deployable locally or in production on a VPS behind Traefik with automatic HTTPS.
 
 ## Features
 
@@ -50,74 +50,149 @@ Full-featured Flask app for document text extraction, image conversion, document
 
 ## Quick Start with Docker
 
-The easiest way to run OCR Engine is with Docker - all dependencies are included.
+All dependencies are bundled in the Docker image — no local installs needed.
 
-### Using Docker Compose (Recommended)
+### Choose a compose file
+
+| File | Use when |
+|------|----------|
+| `docker-compose.yml` | Local dev / quick test — app on `http://localhost:5001` |
+| `docker-compose.full.yml` | Local dev **with** Apache Tika for richer text extraction |
+| `docker-compose.traefik.yml` | **VPS / production** — Traefik reverse proxy, automatic HTTPS, Tika included |
+
+---
+
+### Local development
+
 ```bash
-# Clone and start (basic - without Tika)
-git clone <repository-url>
-cd ocr-engine
-docker-compose up -d
+# 1. Clone the repo
+git clone <repository-url> && cd FileForge
 
-# OR start with Apache Tika for enhanced text extraction
-docker-compose -f docker-compose.full.yml up -d
+# 2. Configure environment
+cp .env.example .env
+# Edit .env — at minimum set SECRET_KEY
 
-# View logs
-docker-compose logs -f
+# 3a. Start without Tika
+docker compose up -d
+
+# 3b. OR start with Apache Tika (enhanced text extraction)
+docker compose -f docker-compose.full.yml up -d
+
+# View live logs
+docker compose logs -f
 
 # Stop
-docker-compose down
+docker compose down
 ```
 
-### Using Docker directly
+App is available at **http://localhost:5001**.
+
+---
+
+### Production on a VPS (Traefik + HTTPS)
+
+Requirements:
+- A domain pointed at your VPS via a DNS **A record**
+- Ports **80** and **443** open in your firewall
+- Docker and `apache2-utils` installed on the server
+
+```bash
+# 1. Install Docker (Debian/Ubuntu)
+apt update && apt install -y docker.io docker-compose apache2-utils
+
+# 2. Clone the repo
+git clone <repository-url> && cd FileForge
+
+# 3. Configure environment
+cp .env.example .env
+# Required edits in .env:
+#   SECRET_KEY   – generate with: python -c "import secrets; print(secrets.token_hex(32))"
+#   DOMAIN       – your domain, e.g. fileforge.example.com
+#   ACME_EMAIL   – email for Let's Encrypt expiry warnings
+#   TRAEFIK_DASHBOARD_AUTH – generate with: htpasswd -nb admin <password>
+#                            then escape every $ → $$ before pasting
+
+# 4. Create the certificate store (must exist and be 600)
+touch traefik/acme.json && chmod 600 traefik/acme.json
+
+# 5. Start the full stack (Traefik + FileForge + Tika)
+docker compose -f docker-compose.traefik.yml up -d
+
+# View logs
+docker compose -f docker-compose.traefik.yml logs -f
+
+# Stop
+docker compose -f docker-compose.traefik.yml down
+```
+
+After startup:
+- App is available at **https://your-domain.com** (HTTP → HTTPS redirect is automatic)
+- Traefik dashboard at **https://your-domain.com/dashboard/** (basic-auth protected)
+- Port 5001 and 9998 are **never exposed** to the internet — only Traefik talks to the app internally
+- TLS certificates are obtained and renewed automatically via Let's Encrypt
+
+---
+
+### Using Docker directly (no compose)
+
 ```bash
 # Build the image
-docker build -t ocr-engine .
+docker build -t fileforge .
 
-# Run the container
+# Run
 docker run -d \
-  --name ocr-engine \
+  --name fileforge \
   -p 5001:5001 \
-  -v ocr-data:/app/data \
+  -v fileforge-data:/app/data \
+  -e SECRET_KEY=change-me \
   -e MAX_FILE_MB=25 \
-  ocr-engine
+  fileforge
 
 # Stop and remove
-docker stop ocr-engine && docker rm ocr-engine
+docker stop fileforge && docker rm fileforge
 ```
 
-The app will be available at `http://localhost:5001`
+---
 
-### Docker Environment Variables
+### Environment variables
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MAX_FILE_MB` | `25` | Maximum upload file size in MB |
-| `TIKA_SERVER_URL` | `http://localhost:9998` | Apache Tika server URL (optional) |
+| `SECRET_KEY` | *(required in production)* | Flask session secret — generate with `secrets.token_hex(32)` |
+| `DOMAIN` | — | Public domain name (Traefik deployment only) |
+| `ACME_EMAIL` | — | Email for Let's Encrypt notifications (Traefik deployment only) |
+| `TRAEFIK_DASHBOARD_AUTH` | — | `htpasswd`-format credentials for the Traefik dashboard |
+| `MAX_FILE_MB` | `25` | Maximum upload size in MB |
+| `TIKA_SERVER_URL` | `http://localhost:9998` | Apache Tika URL (set automatically in compose) |
+| `CLEANUP_TTL_HOURS` | `24` | How long to keep completed job files |
+| `CLEANUP_INTERVAL_MINUTES` | `30` | How often the cleanup routine runs |
+| `WORKER_COUNT` | `2` | Concurrent job workers |
+| `GUNICORN_WORKERS` | `1` | Gunicorn worker processes (keep at 1 with internal queue) |
+| `GUNICORN_THREADS` | `8` | Threads per Gunicorn worker |
+| `OCR_DPI` | `300` | DPI for PDF→image conversion (higher = better quality, more RAM) |
+| `OCR_PAGE_WORKERS` | `2` | Pages OCR'd in parallel within a single job |
+| `OCR_BATCH_SIZE` | `10` | PDF pages converted per batch |
+| `OCR_CACHE_ENABLED` | `1` | Set to `0` to disable the OCR result cache |
+| `OCR_CACHE_MAX_FILE_ENTRIES` | `500` | Max cached Tika file results |
+| `OCR_CACHE_MAX_PAGE_ENTRIES` | `10000` | Max cached per-page OCR results |
 
-### Data Persistence
-The Docker setup uses a named volume `ocr-data` to persist:
-- Uploaded files (`/app/data/uploads`)
-- Conversion results (`/app/data/results`)
-- SQLite database (`/app/data/jobs.db`)
+### Data persistence
 
-### Apache Tika (Optional)
-Apache Tika enhances text extraction from PDFs and documents. Two deployment options:
-
-| Setup | Command | Use Case |
-|-------|---------|----------|
-| Basic | `docker-compose up -d` | OCR, image/audio/video conversion |
-| Full (with Tika) | `docker-compose -f docker-compose.full.yml up -d` | Enhanced text extraction from PDFs |
-
-Tika provides better extraction of embedded text from PDFs without OCR, useful for digital PDFs with selectable text.
+All compose files use a named volume to persist:
+- Uploaded files — `/app/data/uploads`
+- Conversion results — `/app/data/results`
+- SQLite job database — `/app/data/jobs.db`
+- OCR result cache — `/app/data/ocr_cache.db`
 
 ---
 
 ## Manual Setup (Without Docker)
 
-### 1. Create Virtual Environment
+### 1. Create virtual environment
 ```bash
+git clone <repository-url> && cd FileForge
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
@@ -154,17 +229,16 @@ pip install -r requirements.txt
 
 ### 3. Start the Application
 ```bash
+cp .env.example .env   # set SECRET_KEY at minimum
 python app.py
 ```
-The app will run on `http://localhost:5001`
+The app will run on `http://localhost:5001`.
 
 ---
 
 ## Configuration
 
-Environment variables:
-- `TIKA_SERVER_URL` (default `http://localhost:9998`)
-- `MAX_FILE_MB` (default `25`)
+All configuration is done via environment variables. Copy `.env.example` to `.env` and edit as needed. See the [Environment variables](#environment-variables) table in the Docker section above for the full reference.
 
 ## Usage
 

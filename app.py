@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import random
 import threading
 import time
 import uuid
@@ -79,6 +80,17 @@ def _validate_magic(file_path, ext):
     if allowed_exts is None:
         return True  # Unknown MIME type, allow
     return ext in allowed_exts
+
+
+def _generate_captcha():
+    """Return (question_str, answer_str) for a simple arithmetic captcha."""
+    a = random.randint(2, 20)
+    b = random.randint(1, 15)
+    if random.random() < 0.5:
+        return f"What is {a} + {b}?", str(a + b)
+    # Always ensure non-negative result for subtraction
+    hi, lo = max(a, b), min(a, b)
+    return f"What is {hi} - {lo}?", str(hi - lo)
 
 
 def create_app():
@@ -703,9 +715,19 @@ def create_app():
     @app.route("/contact", methods=["GET", "POST"])
     def contact():
         if request.method == "POST":
+            # Honeypot check (already present)
             if request.form.get("website"):
                 flash("Thank you for your message! We'll get back to you soon.", "success")
                 return redirect(url_for("contact"))
+
+            # Captcha verification
+            user_answer = request.form.get("captcha", "").strip()
+            expected_answer = str(session.pop("captcha_answer", ""))
+            if not user_answer or user_answer != expected_answer:
+                flash("Incorrect answer to the security question. Please try again.", "error")
+                captcha_question, captcha_answer = _generate_captcha()
+                session["captcha_answer"] = captcha_answer
+                return render_template("contact.html", captcha_question=captcha_question)
 
             name = request.form.get("name", "").strip()
             email = request.form.get("email", "").strip()
@@ -714,7 +736,9 @@ def create_app():
 
             if not name or not email or not message:
                 flash("Please fill in all required fields.", "error")
-                return render_template("contact.html")
+                captcha_question, captcha_answer = _generate_captcha()
+                session["captcha_answer"] = captcha_answer
+                return render_template("contact.html", captcha_question=captcha_question)
 
             try:
                 job_store.save_contact_submission(name, email, subject, message)
@@ -723,7 +747,9 @@ def create_app():
             except Exception:
                 flash("An error occurred. Please try again.", "error")
 
-        return render_template("contact.html")
+        captcha_question, captcha_answer = _generate_captcha()
+        session["captcha_answer"] = captcha_answer
+        return render_template("contact.html", captcha_question=captcha_question)
 
     @app.route("/terms")
     def terms():

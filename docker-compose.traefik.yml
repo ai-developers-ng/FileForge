@@ -1,0 +1,142 @@
+# Production deployment with Traefik reverse proxy + automatic HTTPS (Let's Encrypt)
+#
+# Usage:
+#   1. cp .env.example .env  &&  edit .env  (set SECRET_KEY, DOMAIN, ACME_EMAIL)
+#   2. touch traefik/acme.json && chmod 600 traefik/acme.json
+#   3. docker compose -f docker-compose.traefik.yml up -d
+#
+# Traefik dashboard (basic-auth protected) is available at:
+#   https://<DOMAIN>/dashboard/
+#
+# To disable the dashboard, remove the labels block from the traefik service.
+
+version: '3.8'
+
+services:
+  # ── Traefik reverse proxy ────────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"       # HTTP  → redirected to HTTPS
+      - "443:443"     # HTTPS
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/acme.json:/acme.json          # Let's Encrypt certificate store
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      # Optional: expose the Traefik dashboard at https://<DOMAIN>/dashboard/
+      # Protect it with a generated basic-auth password:
+      #   htpasswd -nb admin <password>  →  paste result into TRAEFIK_DASHBOARD_AUTH in .env
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
+      - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik-dashboard.service=api@internal"
+      - "traefik.http.routers.traefik-dashboard.middlewares=dashboard-auth"
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_AUTH}"
+
+  # ── FileForge application ────────────────────────────────────────────────────
+  fileforge:
+    build: .
+    container_name: fileforge
+    # No ports exposed to the host — Traefik reaches the container directly
+    volumes:
+      - fileforge-data:/app/data
+    environment:
+      - SECRET_KEY=${SECRET_KEY}
+      - FLASK_ENV=production
+      - MAX_FILE_MB=${MAX_FILE_MB:-25}
+      - CLEANUP_TTL_HOURS=${CLEANUP_TTL_HOURS:-24}
+      - CLEANUP_INTERVAL_MINUTES=${CLEANUP_INTERVAL_MINUTES:-30}
+      - WORKER_COUNT=${WORKER_COUNT:-2}
+      - GUNICORN_WORKERS=${GUNICORN_WORKERS:-1}
+      - GUNICORN_THREADS=${GUNICORN_THREADS:-8}
+      - OCR_DPI=${OCR_DPI:-300}
+      - OCR_PAGE_WORKERS=${OCR_PAGE_WORKERS:-2}
+      - OCR_BATCH_SIZE=${OCR_BATCH_SIZE:-10}
+      - OCR_CACHE_ENABLED=${OCR_CACHE_ENABLED:-1}
+      - OCR_CACHE_MAX_FILE_ENTRIES=${OCR_CACHE_MAX_FILE_ENTRIES:-500}
+      - OCR_CACHE_MAX_PAGE_ENTRIES=${OCR_CACHE_MAX_PAGE_ENTRIES:-10000}
+      - TIKA_SERVER_URL=http://tika:9998
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 1G
+    depends_on:
+      tika:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - traefik-net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+
+      # ── HTTP → HTTPS redirect ──────────────────────────────────────────────
+      - "traefik.http.routers.fileforge-http.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.fileforge-http.entrypoints=web"
+      - "traefik.http.routers.fileforge-http.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+
+      # ── HTTPS router ──────────────────────────────────────────────────────
+      - "traefik.http.routers.fileforge-https.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.fileforge-https.entrypoints=websecure"
+      - "traefik.http.routers.fileforge-https.tls=true"
+      - "traefik.http.routers.fileforge-https.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fileforge-https.middlewares=secure-headers"
+      - "traefik.http.routers.fileforge-https.service=fileforge-svc"
+
+      # ── Backend (internal port 5001) ───────────────────────────────────────
+      - "traefik.http.services.fileforge-svc.loadbalancer.server.port=5001"
+
+      # ── Security headers middleware ────────────────────────────────────────
+      - "traefik.http.middlewares.secure-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.secure-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.secure-headers.headers.stsPreload=true"
+      - "traefik.http.middlewares.secure-headers.headers.forceSTSHeader=true"
+      - "traefik.http.middlewares.secure-headers.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.secure-headers.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.secure-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+
+  # ── Apache Tika server ──────────────────────────────────────────────────────
+  tika:
+    image: apache/tika:latest
+    container_name: tika-server
+    # Port 9998 is NOT exposed to the host — only fileforge reaches it internally
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo -e \"GET /tika HTTP/1.0\\r\\n\\r\\n\" > /dev/tcp/localhost/9998'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - traefik-net
+
+networks:
+  traefik-net:
+    name: traefik-net
+    driver: bridge
+
+volumes:
+  fileforge-data:
+    driver: local

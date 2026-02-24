@@ -1,0 +1,43 @@
+# Traefik v3 static configuration
+# Mounted read-only into the container at /etc/traefik/traefik.yml
+
+# ── API / Dashboard ────────────────────────────────────────────────────────────
+api:
+  dashboard: true   # served at https://<DOMAIN>/dashboard/  (protected by basic-auth label)
+  insecure: false   # never expose dashboard on port 8080
+
+# ── Entry points ───────────────────────────────────────────────────────────────
+entryPoints:
+  web:
+    address: ":80"
+    # Global HTTP→HTTPS redirect (labels in compose handle per-router redirect)
+  websecure:
+    address: ":443"
+    http:
+      tls:
+        certResolver: letsencrypt
+
+# ── Certificate resolvers (Let's Encrypt) ─────────────────────────────────────
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # Replace with your real email — Let's Encrypt sends expiry warnings here
+      email: "${ACME_EMAIL}"
+      storage: /acme.json
+      # Use HTTP-01 challenge (port 80 must be reachable from the internet)
+      httpChallenge:
+        entryPoint: web
+      # Uncomment to use staging CA while testing (avoids rate-limits):
+      # caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+
+# ── Providers ─────────────────────────────────────────────────────────────────
+providers:
+  docker:
+    exposedByDefault: false   # only containers with traefik.enable=true are routed
+    watch: true
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log:
+  level: INFO   # DEBUG | INFO | WARN | ERROR
+
+accessLog: {}   # enable access logs (written to stdout)

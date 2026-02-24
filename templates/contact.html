@@ -47,6 +47,12 @@
             <textarea id="message" name="message" required placeholder="Tell us what's on your mind..."></textarea>
         </div>
 
+        <div class="field captcha-field">
+            <label for="captcha">Security check: {{ captcha_question }}</label>
+            <input type="text" id="captcha" name="captcha" required autocomplete="off"
+                   placeholder="Your answer" inputmode="numeric" pattern="-?\d+">
+        </div>
+
         <button type="submit">Send Message</button>
     </form>
 
