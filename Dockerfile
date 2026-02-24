@@ -90,8 +90,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create data directories
-RUN mkdir -p /app/data/uploads /app/data/results
+# Create non-root user and data directories
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && mkdir -p /app/data/uploads /app/data/results \
+    && chown -R appuser:appuser /app
+
+USER appuser
 
 # Expose port
 EXPOSE 5001

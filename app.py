@@ -8,7 +8,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from flask import Flask, Response, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_compress import Compress
@@ -98,6 +98,7 @@ def create_app():
     app.secret_key = os.environ.get("SECRET_KEY", "fileforge-dev-key-change-in-production")
     if os.environ.get("FLASK_ENV") == "production" and app.secret_key == "fileforge-dev-key-change-in-production":
         raise RuntimeError("SECRET_KEY must be set in production. Set the SECRET_KEY environment variable.")
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=24)
     limiter = Limiter(get_remote_address, app=app, storage_uri="memory://", default_limits=[])
     csrf = CSRFProtect(app)
     compress = Compress(app)
@@ -210,9 +211,26 @@ def create_app():
             session["sid"] = str(uuid.uuid4())
             session.permanent = True
 
+    @app.after_request
+    def add_security_headers(response):
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        if os.environ.get("FLASK_ENV") == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
     @app.context_processor
     def inject_now():
         return {"now": datetime.now(UTC)}
+    _VALID_OCR_LANGS = {
+        "eng", "fra", "deu", "spa", "ita", "por", "nld", "rus",
+        "chi_sim", "chi_tra", "jpn", "kor", "ara", "hin", "tur",
+    }
+    _VALID_PSM = {str(i) for i in range(14)}   # 0-13
+    _VALID_OEM = {"0", "1", "2", "3"}
+
     ocr_ext = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
     # ImageMagick supported formats (via Wand)
     image_ext = {
@@ -364,13 +382,22 @@ def create_app():
             access_token = job_store.create_job(job_id, filename, options)
             executor.submit(_run_encrypted_pipeline, process_video_job, job_id, upload_path, options, settings, job_store)
         else:
+            lang = request.form.get("lang", "eng")
+            if lang not in _VALID_OCR_LANGS:
+                return jsonify({"error": "unsupported OCR language"}), 400
+            psm = request.form.get("psm", "6")
+            if psm not in _VALID_PSM:
+                return jsonify({"error": "invalid psm value"}), 400
+            oem = request.form.get("oem", "1")
+            if oem not in _VALID_OEM:
+                return jsonify({"error": "invalid oem value"}), 400
             options = {
                 "job_type": "ocr",
                 "mode": request.form.get("mode", "text"),
                 "ocr_engine": request.form.get("ocr_engine", "tesseract"),
-                "lang": request.form.get("lang", "eng"),
-                "psm": request.form.get("psm", "6"),
-                "oem": request.form.get("oem", "1"),
+                "lang": lang,
+                "psm": psm,
+                "oem": oem,
                 "preprocess": request.form.get("preprocess", "standard"),
             }
             access_token = job_store.create_job(job_id, filename, options)
@@ -713,6 +740,7 @@ def create_app():
         return render_template("about.html")
 
     @app.route("/contact", methods=["GET", "POST"])
+    @limiter.limit("5/minute;20/hour")
     def contact():
         if request.method == "POST":
             # Honeypot check (already present)

@@ -7,29 +7,40 @@ const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || 
 // Encryption Key Management
 // ============================================
 const getOrCreateEncryptionKey = async () => {
+  // crypto.subtle requires a secure context (HTTPS or localhost).
+  // Gracefully skip encryption on plain HTTP so uploads still work.
+  if (!globalThis.crypto?.subtle) return null;
+
   let keyB64 = sessionStorage.getItem("encryptionKey");
   if (keyB64) return keyB64;
 
-  const key = await crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 },
-    true,
-    ["encrypt", "decrypt"]
-  );
-  const raw = await crypto.subtle.exportKey("raw", key);
-  keyB64 = btoa(String.fromCharCode(...new Uint8Array(raw)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-  sessionStorage.setItem("encryptionKey", keyB64);
-  return keyB64;
+  try {
+    const key = await crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    );
+    const raw = await crypto.subtle.exportKey("raw", key);
+    keyB64 = btoa(String.fromCharCode(...new Uint8Array(raw)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    sessionStorage.setItem("encryptionKey", keyB64);
+    return keyB64;
+  } catch {
+    return null;
+  }
 };
 
 let encryptionKeyPromise = getOrCreateEncryptionKey();
 
+// Returns extra headers for encryption — empty object if key unavailable (HTTP context).
+const encKeyHeaders = (encKey) => encKey ? { "X-Encryption-Key": encKey } : {};
+
 const encryptedDownload = async (url, filename) => {
   const encKey = await encryptionKeyPromise;
   const resp = await fetch(url, {
-    headers: { "X-Encryption-Key": encKey },
+    headers: encKeyHeaders(encKey),
   });
   if (!resp.ok) {
     alert("Download failed: " + (await resp.text()));
@@ -254,9 +265,13 @@ const renderFiles = (files) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
     pill.dataset.fileIndex = index;
-    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
-      file.size / 1024
-    )} KB</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = file.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "file-status";
+    sizeSpan.textContent = `${Math.ceil(file.size / 1024)} KB`;
+    pill.appendChild(nameSpan);
+    pill.appendChild(sizeSpan);
     fileList.appendChild(pill);
   });
 };
@@ -400,7 +415,7 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
             try {
               const ek = await encryptionKeyPromise;
               const resultResponse = await fetch(`/api/jobs/${lastCompleted.jobId}/result?token=${encodeURIComponent(lastCompleted.accessToken)}`, {
-                headers: { "X-Encryption-Key": ek },
+                headers: encKeyHeaders(ek),
               });
               const result = await resultResponse.json();
               resultText.value = result.final_text || "No text extracted.";
@@ -416,7 +431,7 @@ const pollJob = async (jobIndex, jobId, accessToken, jobMode) => {
             try {
               const ek = await encryptionKeyPromise;
               const resultResponse = await fetch(`/api/jobs/${completedJob.jobId}/result?token=${encodeURIComponent(completedJob.accessToken)}`, {
-                headers: { "X-Encryption-Key": ek },
+                headers: encKeyHeaders(ek),
               });
               const result = await resultResponse.json();
               if (result.final_text) {
@@ -498,7 +513,7 @@ const submitFiles = async () => {
       const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
+        headers: { "X-CSRFToken": csrfToken, ...encKeyHeaders(encKey) },
         body: formData,
       });
       const payload = await response.json();
@@ -566,9 +581,13 @@ const renderImageFiles = (files) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
     pill.dataset.fileIndex = index;
-    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
-      file.size / 1024
-    )} KB</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = file.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "file-status";
+    sizeSpan.textContent = `${Math.ceil(file.size / 1024)} KB`;
+    pill.appendChild(nameSpan);
+    pill.appendChild(sizeSpan);
     imageFileList.appendChild(pill);
   });
 };
@@ -675,7 +694,7 @@ const submitImageFiles = async () => {
       const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
+        headers: { "X-CSRFToken": csrfToken, ...encKeyHeaders(encKey) },
         body: formData,
       });
       const payload = await response.json();
@@ -863,9 +882,13 @@ const renderDocumentFiles = (files) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
     pill.dataset.fileIndex = index;
-    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
-      file.size / 1024
-    )} KB</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = file.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "file-status";
+    sizeSpan.textContent = `${Math.ceil(file.size / 1024)} KB`;
+    pill.appendChild(nameSpan);
+    pill.appendChild(sizeSpan);
     documentFileList.appendChild(pill);
   });
 };
@@ -962,7 +985,7 @@ const submitDocumentFiles = async () => {
       const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
+        headers: { "X-CSRFToken": csrfToken, ...encKeyHeaders(encKey) },
         body: formData,
       });
       const payload = await response.json();
@@ -1030,9 +1053,13 @@ const renderAudioFiles = (files) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
     pill.dataset.fileIndex = index;
-    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
-      file.size / 1024
-    )} KB</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = file.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "file-status";
+    sizeSpan.textContent = `${Math.ceil(file.size / 1024)} KB`;
+    pill.appendChild(nameSpan);
+    pill.appendChild(sizeSpan);
     audioFileList.appendChild(pill);
   });
 };
@@ -1129,7 +1156,7 @@ const submitAudioFiles = async () => {
       const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
+        headers: { "X-CSRFToken": csrfToken, ...encKeyHeaders(encKey) },
         body: formData,
       });
       const payload = await response.json();
@@ -1197,9 +1224,13 @@ const renderVideoFiles = (files) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
     pill.dataset.fileIndex = index;
-    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
-      file.size / 1024
-    )} KB</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = file.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "file-status";
+    sizeSpan.textContent = `${Math.ceil(file.size / 1024)} KB`;
+    pill.appendChild(nameSpan);
+    pill.appendChild(sizeSpan);
     videoFileList.appendChild(pill);
   });
 };
@@ -1296,7 +1327,7 @@ const submitVideoFiles = async () => {
       const encKey = await encryptionKeyPromise;
       const response = await fetch("/api/jobs", {
         method: "POST",
-        headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
+        headers: { "X-CSRFToken": csrfToken, ...encKeyHeaders(encKey) },
         body: formData,
       });
       const payload = await response.json();
@@ -1549,9 +1580,13 @@ const renderPdfFiles = (files) => {
     const pill = document.createElement("div");
     pill.className = "file-pill";
     pill.dataset.fileIndex = index;
-    pill.innerHTML = `<span>${file.name}</span><span class="file-status">${Math.ceil(
-      file.size / 1024
-    )} KB</span>`;
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = file.name;
+    const sizeSpan = document.createElement("span");
+    sizeSpan.className = "file-status";
+    sizeSpan.textContent = `${Math.ceil(file.size / 1024)} KB`;
+    pill.appendChild(nameSpan);
+    pill.appendChild(sizeSpan);
     pdfFileList.appendChild(pill);
   });
 };
@@ -1638,7 +1673,7 @@ const submitPdfFiles = async () => {
     const encKey = await encryptionKeyPromise;
     const response = await fetch("/api/pdf-jobs", {
       method: "POST",
-      headers: { "X-CSRFToken": csrfToken, "X-Encryption-Key": encKey },
+      headers: { "X-CSRFToken": csrfToken, ...encKeyHeaders(encKey) },
       body: formData,
     });
     const payload = await response.json();
