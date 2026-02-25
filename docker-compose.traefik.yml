@@ -29,7 +29,7 @@ services:
       # Optional: expose the Traefik dashboard at https://<DOMAIN>/dashboard/
       # Protect it with a generated basic-auth password:
       #   htpasswd -nb admin <password>  →  paste result into TRAEFIK_DASHBOARD_AUTH in .env
-      - "traefik.http.routers.traefik-dashboard.rule=Host(`${DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.traefik-dashboard.rule=Host(`${DOMAIN}`) && PathPrefix(`/dashboard`)"
       - "traefik.http.routers.traefik-dashboard.entrypoints=websecure"
       - "traefik.http.routers.traefik-dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.routers.traefik-dashboard.service=api@internal"
