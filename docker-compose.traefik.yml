@@ -10,8 +10,6 @@
 #
 # To disable the dashboard, remove the labels block from the traefik service.
 
-version: '3.8'
-
 services:
   # ── Traefik reverse proxy ────────────────────────────────────────────────────
   traefik:
