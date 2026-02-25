@@ -2,8 +2,7 @@
 #
 # Usage:
 #   1. cp .env.example .env  &&  edit .env  (set SECRET_KEY, DOMAIN, ACME_EMAIL)
-#   2. touch traefik/acme.json && chmod 600 traefik/acme.json
-#   3. docker compose -f docker-compose.traefik.yml up -d
+#   2. docker compose -f docker-compose.traefik.yml up -d
 #
 # Traefik dashboard (basic-auth protected) is available at:
 #   https://<DOMAIN>/dashboard/
@@ -13,7 +12,7 @@
 services:
   # ── Traefik reverse proxy ────────────────────────────────────────────────────
   traefik:
-    image: traefik:v3.3
+    image: traefik:v3.6.9
     container_name: traefik
     restart: unless-stopped
     ports:
@@ -22,7 +21,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./traefik/acme.json:/acme.json          # Let's Encrypt certificate store
+      - traefik-acme:/data                      # Let's Encrypt certificate store
     networks:
       - traefik-net
     labels:
@@ -136,5 +135,7 @@ networks:
     driver: bridge
 
 volumes:
+  traefik-acme:
+    driver: local
   fileforge-data:
     driver: local

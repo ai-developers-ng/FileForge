@@ -22,8 +22,8 @@ certificatesResolvers:
   letsencrypt:
     acme:
       # Replace with your real email — Let's Encrypt sends expiry warnings here
-      email: "${ACME_EMAIL}"
-      storage: /acme.json
+      email: shohagh121@hotmail.com
+      storage: /data/acme.json
       # Use HTTP-01 challenge (port 80 must be reachable from the internet)
       httpChallenge:
         entryPoint: web
