@@ -5,6 +5,11 @@
     <header class="hero-header">
         <h1>FileForge</h1>
         <p>Transform your files with powerful conversion tools. OCR, images, audio, video, and documents - all in one place.</p>
+        {% if total_processed > 0 %}
+        <p class="hero-stat">
+            <strong>{{ "{:,}".format(total_processed) }}</strong> documents processed and counting
+        </p>
+        {% endif %}
     </header>
 
     <div class="encryption-notice" id="encryptionNotice">
@@ -76,6 +81,16 @@
                             <option value="ara">Arabic</option>
                             <option value="hin">Hindi</option>
                             <option value="tur">Turkish</option>
+                        </select>
+                    </div>
+
+                    <div class="field-group">
+                        <span class="group-label">Scan Quality (DPI)</span>
+                        <select name="dpi" class="select" title="Higher DPI improves accuracy on scanned documents but is slower. Use 150 for digital PDFs.">
+                            <option value="150">150 — Digital PDF / fast</option>
+                            <option value="200">200 — Mixed content</option>
+                            <option value="300" selected>300 — Scanned / best quality</option>
+                            <option value="100">100 — Draft / preview</option>
                         </select>
                     </div>
 

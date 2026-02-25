@@ -16,12 +16,14 @@ logger = logging.getLogger(__name__)
 _LOW_RES_THRESHOLD = 1240
 
 
-def preprocess_for_ocr(image, profile="standard"):
+def preprocess_for_ocr(image, profile="standard", deskew=True):
     """Apply OCR-optimised preprocessing to a PIL image.
 
     Args:
         image: PIL Image object (any mode)
         profile: "none", "standard", or "aggressive"
+        deskew: Whether to run deskew correction (disable for digital/native PDFs
+                to skip the expensive PIL→Wand→PNG→PIL round-trip)
 
     Returns:
         Preprocessed PIL Image (mode "L" — grayscale)
@@ -44,14 +46,17 @@ def preprocess_for_ocr(image, profile="standard"):
         logger.info("Upscaled low-res image 2x to %dx%d", new_w, new_h)
 
     # ── Step 3: Deskew (standard + aggressive) ────────────────────
-    try:
-        image = _deskew(image)
-        # Wand's PNG round-trip can return mode "1" (1-bit binary);
-        # autocontrast and filters require mode "L".
-        if image.mode != "L":
-            image = image.convert("L")
-    except Exception as exc:
-        logger.warning("Deskew failed, skipping: %s", exc)
+    # Skip for native digital PDFs — they don't have scan skew and the
+    # PIL→Wand→PNG→PIL round-trip costs ~100-200 ms per page for nothing.
+    if deskew:
+        try:
+            image = _deskew(image)
+            # Wand's PNG round-trip can return mode "1" (1-bit binary);
+            # autocontrast and filters require mode "L".
+            if image.mode != "L":
+                image = image.convert("L")
+        except Exception as exc:
+            logger.warning("Deskew failed, skipping: %s", exc)
 
     # ── Step 4: Auto-contrast (standard + aggressive) ─────────────
     # Clips the top/bottom 1% of the histogram to improve contrast

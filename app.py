@@ -230,6 +230,7 @@ def create_app():
     }
     _VALID_PSM = {str(i) for i in range(14)}   # 0-13
     _VALID_OEM = {"0", "1", "2", "3"}
+    _VALID_OCR_DPIS = {"100", "150", "200", "300"}
 
     ocr_ext = {".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp"}
     # ImageMagick supported formats (via Wand)
@@ -272,7 +273,7 @@ def create_app():
 
     @app.route("/")
     def index():
-        return render_template("index.html")
+        return render_template("index.html", total_processed=job_store.count_completed_jobs())
 
     @app.route("/results/<job_id>")
     def result_page(job_id):
@@ -391,6 +392,9 @@ def create_app():
             oem = request.form.get("oem", "1")
             if oem not in _VALID_OEM:
                 return jsonify({"error": "invalid oem value"}), 400
+            dpi = request.form.get("dpi", "300")
+            if dpi not in _VALID_OCR_DPIS:
+                return jsonify({"error": "invalid dpi value"}), 400
             options = {
                 "job_type": "ocr",
                 "mode": request.form.get("mode", "text"),
@@ -398,6 +402,7 @@ def create_app():
                 "lang": lang,
                 "psm": psm,
                 "oem": oem,
+                "dpi": dpi,
                 "preprocess": request.form.get("preprocess", "standard"),
             }
             access_token = job_store.create_job(job_id, filename, options)

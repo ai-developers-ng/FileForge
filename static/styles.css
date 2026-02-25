@@ -238,6 +238,17 @@ textarea {
   margin: 10px auto 0;
 }
 
+.hero-stat {
+  margin-top: 14px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.hero-stat strong {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
 .converter-card {
   background: var(--card);
   border-radius: 20px;

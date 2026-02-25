@@ -112,6 +112,11 @@ class JobStore:
             )
         return access_token
 
+    def count_completed_jobs(self):
+        with self._lock, self._connect() as conn:
+            row = conn.execute("select count(*) from jobs where status='completed'").fetchone()
+        return row[0] if row else 0
+
     def update_job(self, job_id, **fields):
         fields["updated_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()
         keys = ", ".join(f"{key}=?" for key in fields.keys())

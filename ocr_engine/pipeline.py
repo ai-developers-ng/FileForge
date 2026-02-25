@@ -18,14 +18,14 @@ def _ocr_page_task(args):
     """Parallel-safe per-page OCR worker with page-level cache support.
 
     Args:
-        args: tuple of (idx, image, engine, lang, psm, oem, preprocess,
+        args: tuple of (idx, image, engine, lang, psm, oem, preprocess, deskew,
                         cache, page_opts_hash)
               cache and page_opts_hash may both be None when caching is disabled.
 
     Returns:
         tuple of (idx, ocr_result_dict, error_msg_or_None)
     """
-    idx, image, engine, lang, psm, oem, preprocess, cache, page_opts_hash = args
+    idx, image, engine, lang, psm, oem, preprocess, deskew, cache, page_opts_hash = args
 
     # ── Page cache check ──────────────────────────────────────────────────────
     image_hash = None
@@ -41,7 +41,7 @@ def _ocr_page_task(args):
     local_result = {"errors": local_errors}
     ocr_text = _run_ocr_engine(
         image, engine, local_result,
-        lang=lang, psm=psm, oem=oem, preprocess=preprocess,
+        lang=lang, psm=psm, oem=oem, preprocess=preprocess, deskew=deskew,
     )
     error_msg = local_errors[0] if local_errors else None
 
@@ -56,6 +56,23 @@ def _ocr_page_task(args):
 
 def _is_pdf(file_path):
     return os.path.splitext(file_path)[1].lower() == ".pdf"
+
+
+def _has_embedded_text(file_path, min_chars=100):
+    """Return True if the PDF has extractable text (i.e. digital, not scanned).
+
+    Checks the first three pages for at least min_chars of real text.  If found,
+    the document is a native digital PDF and deskew can be safely skipped.
+    """
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(file_path)
+        for page in reader.pages[:3]:
+            if len((page.extract_text() or "").strip()) >= min_chars:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _is_image(file_path):
@@ -214,13 +231,20 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
             
             # Convert document to images
             ocr_images = []
+            # Auto-detect whether this is a scanned vs. digital PDF so we can
+            # skip the expensive deskew step for native digital documents.
+            is_scanned = True
+            if _is_pdf(file_path):
+                is_scanned = not _has_embedded_text(file_path)
+                logger.info(f"PDF scan detection for job {job_id}: {'scanned' if is_scanned else 'digital (deskew disabled)'}")
             if _is_pdf(file_path):
                 try:
-                    logger.info(f"Converting PDF to images for job {job_id}")
+                    job_dpi = int(options.get("dpi", getattr(settings, "ocr_dpi", 300)))
+                    logger.info(f"Converting PDF to images for job {job_id} at {job_dpi} DPI")
                     ocr_images = _pdf_to_images(
                         file_path,
                         batch_size=getattr(settings, "ocr_batch_size", 10),
-                        dpi=getattr(settings, "ocr_dpi", 300),
+                        dpi=job_dpi,
                     )
                     logger.info(f"PDF converted to {len(ocr_images)} page(s)")
                 except ImportError as exc:
@@ -260,7 +284,7 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
                 )
 
                 page_args_list = [
-                    (idx, image, ocr_engine, lang, psm, oem, preprocess, cache, page_opts_hash)
+                    (idx, image, ocr_engine, lang, psm, oem, preprocess, is_scanned, cache, page_opts_hash)
                     for idx, image in enumerate(ocr_images, start=1)
                 ]
 
@@ -369,7 +393,7 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
         )
 
 
-def _run_ocr_engine(image, engine, result, lang="eng", psm=6, oem=1, preprocess="standard"):
+def _run_ocr_engine(image, engine, result, lang="eng", psm=6, oem=1, preprocess="standard", deskew=True):
     """Run OCR engine on an image with error handling and logging.
 
     Args:
@@ -380,16 +404,17 @@ def _run_ocr_engine(image, engine, result, lang="eng", psm=6, oem=1, preprocess=
         psm: Tesseract page segmentation mode (default: 6)
         oem: Tesseract OCR engine mode (default: 1 — LSTM only)
         preprocess: Image preprocessing profile ("none", "standard", "aggressive")
+        deskew: Whether to apply deskew correction (False for digital PDFs)
 
     Returns:
         Dictionary with 'text', 'engine', and 'detail' keys
     """
     try:
-        logger.info(f"Running OCR with engine: {engine}, lang: {lang}, psm: {psm}, oem: {oem}, preprocess: {preprocess}")
+        logger.info(f"Running OCR with engine: {engine}, lang: {lang}, psm: {psm}, oem: {oem}, preprocess: {preprocess}, deskew: {deskew}")
 
         if engine != "tesseract":
             raise ValueError(f"Unsupported OCR engine: {engine}")
-        ocr_result = run_tesseract(image, lang=lang, psm=psm, oem=oem, preprocess=preprocess)
+        ocr_result = run_tesseract(image, lang=lang, psm=psm, oem=oem, preprocess=preprocess, deskew=deskew)
         
         result_dict = ocr_result.__dict__
         logger.info(f"OCR completed. Engine: {engine}, Text length: {len(result_dict['text'])}, "
