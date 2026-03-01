@@ -1,5 +1,8 @@
+import gc
 import mimetypes
 import os
+import queue as _queue
+import threading as _threading
 import traceback
 import logging
 from concurrent.futures import ThreadPoolExecutor as _PageExecutor, as_completed as _as_completed
@@ -80,58 +83,59 @@ def _is_image(file_path):
     return mime.startswith("image/")
 
 
-def _pdf_to_images(file_path, batch_size=10, dpi=300):
-    """Convert PDF to images in batches to reduce memory usage.
+def _pdf_page_count(file_path: str) -> int:
+    """Return the page count of a PDF using pypdf (in-process, no subprocess).
 
-    For large PDFs, processing all pages at once can cause OOM errors.
-    This function processes pages in batches and yields them one at a time.
+    Avoids the ~100-300 ms overhead of spawning pdfinfo_from_path just to
+    count pages.  Falls back to 0 on any error so callers can degrade gracefully.
+    """
+    try:
+        from pypdf import PdfReader
+        return len(PdfReader(file_path).pages)
+    except Exception as exc:
+        logger.warning("Could not read page count via pypdf: %s", exc)
+        return 0
+
+
+def _pdf_to_images_generator(file_path, batch_size=10, dpi=300):
+    """Yield PIL images for each page of a PDF, rendered in small batches.
+
+    Unlike the old list-returning helper, this is a generator so the caller
+    can start processing early pages while later batches are still being
+    rendered — enabling the streaming producer-consumer OCR pipeline.
 
     Args:
         file_path: Path to the PDF file
-        batch_size: Number of pages to process in each batch (default: 10)
-        dpi: Resolution for rendering (default: 300 — optimal for Tesseract accuracy)
+        batch_size: Pages to render per convert_from_path call (default: 10)
+        dpi: Render resolution (default: 300 — optimal for Tesseract accuracy)
 
-    Returns:
-        List of PIL Image objects
+    Yields:
+        PIL Image objects, one per page, in document order
     """
-    from pdf2image import convert_from_path, pdfinfo_from_path
-    import gc
+    from pdf2image import convert_from_path
 
-    # Get total page count
-    try:
-        info = pdfinfo_from_path(file_path)
-        total_pages = info.get('Pages', 0)
-        logger.info(f"PDF has {total_pages} pages, will process in batches of {batch_size} at {dpi} DPI")
-    except Exception as e:
-        logger.warning(f"Could not get page count, processing all at once: {e}")
-        return convert_from_path(file_path, dpi=dpi)
+    total_pages = _pdf_page_count(file_path)
+    if total_pages == 0:
+        # Fallback: convert everything in one call
+        logger.warning("Page count unavailable — rendering entire PDF at once")
+        yield from convert_from_path(file_path, dpi=dpi)
+        return
 
-    # If small PDF, process all at once
-    if total_pages <= batch_size:
-        return convert_from_path(file_path, dpi=dpi)
-
-    # Process in batches for large PDFs
-    all_images = []
+    logger.info(
+        "PDF has %d pages; rendering in batches of %d at %d DPI",
+        total_pages, batch_size, dpi,
+    )
     for start_page in range(1, total_pages + 1, batch_size):
         end_page = min(start_page + batch_size - 1, total_pages)
-        logger.info(f"Converting pages {start_page}-{end_page}/{total_pages}")
-
-        try:
-            batch_images = convert_from_path(
-                file_path,
-                first_page=start_page,
-                last_page=end_page,
-                dpi=dpi,
-            )
-            all_images.extend(batch_images)
-
-            # Force garbage collection after each batch
-            gc.collect()
-        except Exception as e:
-            logger.error(f"Failed to convert pages {start_page}-{end_page}: {e}")
-            raise
-
-    return all_images
+        logger.info("Rendering pages %d–%d / %d", start_page, end_page, total_pages)
+        batch = convert_from_path(
+            file_path,
+            first_page=start_page,
+            last_page=end_page,
+            dpi=dpi,
+        )
+        yield from batch
+        gc.collect()
 
 
 def process_job(job_id, file_path, options, settings, job_store, cancel_event=None, cache=None):
@@ -227,130 +231,165 @@ def process_job(job_id, file_path, options, settings, job_store, cancel_event=No
             
         # Mode: 'ocr' or 'both' - OCR processing required
         elif mode in ("ocr", "both"):
-            logger.info(f"OCR mode ({mode}) for job {job_id}")
-            
-            # Convert document to images
-            ocr_images = []
-            # Auto-detect whether this is a scanned vs. digital PDF so we can
-            # skip the expensive deskew step for native digital documents.
+            logger.info("OCR mode (%s) for job %s", mode, job_id)
+
+            # Auto-detect scanned vs. digital PDF to skip expensive deskew
             is_scanned = True
             if _is_pdf(file_path):
                 is_scanned = not _has_embedded_text(file_path)
-                logger.info(f"PDF scan detection for job {job_id}: {'scanned' if is_scanned else 'digital (deskew disabled)'}")
-            if _is_pdf(file_path):
-                try:
-                    job_dpi = int(options.get("dpi", getattr(settings, "ocr_dpi", 300)))
-                    logger.info(f"Converting PDF to images for job {job_id} at {job_dpi} DPI")
-                    ocr_images = _pdf_to_images(
-                        file_path,
-                        batch_size=getattr(settings, "ocr_batch_size", 10),
-                        dpi=job_dpi,
-                    )
-                    logger.info(f"PDF converted to {len(ocr_images)} page(s)")
-                except ImportError as exc:
-                    error_msg = "PDF rendering failed: Poppler is not installed. Please install poppler-utils (Linux/Windows) or poppler (macOS via Homebrew: brew install poppler)"
-                    logger.error(error_msg, exc_info=True)
-                    result["errors"].append(error_msg)
-                except Exception as exc:
-                    # Check if it's a Poppler-related error
-                    if "poppler" in str(exc).lower() or "pdfinfonotinstalled" in str(type(exc).__name__).lower():
-                        error_msg = f"PDF rendering failed: Poppler is not installed or not in PATH. Please install poppler-utils (Linux/Windows) or poppler (macOS via Homebrew: brew install poppler). Error: {exc}"
-                    else:
-                        error_msg = f"PDF rendering failed: {exc}"
-                    logger.error(error_msg, exc_info=True)
-                    result["errors"].append(error_msg)
-            elif _is_image(file_path):
-                logger.info(f"Processing image file for job {job_id}")
-                ocr_images = [open_image(file_path)]
-            else:
-                result["errors"].append("Unsupported file type for OCR.")
-            
-            # Run OCR on all images (parallel page workers)
-            ocr_page_pdfs = []
-            if ocr_images:
-                import gc
-                total_pages = len(ocr_images)
-                page_workers = getattr(settings, "ocr_page_workers", 2)
-
-                # Compute a single options hash for all pages in this job
-                page_opts_hash = (
-                    hash_options(options, keys=_PAGE_OPTS_KEYS)
-                    if cache is not None else None
-                )
                 logger.info(
-                    f"Starting parallel OCR: {total_pages} page(s), "
-                    f"{page_workers} worker(s), cache={'on' if cache else 'off'} "
-                    f"for job {job_id}"
+                    "PDF scan detection for job %s: %s",
+                    job_id, "scanned" if is_scanned else "digital (deskew disabled)",
                 )
 
-                page_args_list = [
-                    (idx, image, ocr_engine, lang, psm, oem, preprocess, is_scanned, cache, page_opts_hash)
-                    for idx, image in enumerate(ocr_images, start=1)
-                ]
+            job_dpi = int(options.get("dpi", getattr(settings, "ocr_dpi", 300)))
+            batch_size = getattr(settings, "ocr_batch_size", 10)
+            page_workers = getattr(settings, "ocr_page_workers", 2)
 
-                page_results = {}  # idx -> (ocr_text_dict, error_msg)
-                completed_count = 0
+            # Compute a single options hash for all pages in this job
+            page_opts_hash = (
+                hash_options(options, keys=_PAGE_OPTS_KEYS)
+                if cache is not None else None
+            )
 
-                with _PageExecutor(max_workers=page_workers) as page_exec:
-                    futures = {
-                        page_exec.submit(_ocr_page_task, args): args[0]
-                        for args in page_args_list
-                    }
-                    for future in _as_completed(futures):
-                        if cancel_event and cancel_event.is_set():
-                            logger.info(f"Job {job_id} cancelled during parallel OCR")
-                            for f in futures:
-                                f.cancel()
-                            return
+            # Estimate total pages upfront (pypdf, no subprocess) so progress
+            # percentages are meaningful even before rendering completes.
+            total_pages = _pdf_page_count(file_path) if _is_pdf(file_path) else 1
+            if total_pages == 0:
+                total_pages = 1  # safety fallback
 
-                        try:
-                            idx, ocr_text, error_msg = future.result()
-                        except Exception as exc:
-                            idx = futures[future]
-                            error_msg = f"Page {idx} OCR failed: {exc}"
-                            ocr_text = {"text": "", "engine": ocr_engine, "detail": {"error": str(exc)}}
+            # ── Producer thread: render pages and push onto a bounded queue ──
+            # This lets OCR workers start on page 1 while pages 2-N are still
+            # being rendered, overlapping rendering and OCR work.
+            render_q: _queue.Queue = _queue.Queue(maxsize=batch_size * 2)
 
-                        page_results[idx] = (ocr_text, error_msg)
-                        if error_msg:
-                            result["errors"].append(error_msg)
+            def _render_producer():
+                try:
+                    if _is_pdf(file_path):
+                        for img in _pdf_to_images_generator(file_path, batch_size=batch_size, dpi=job_dpi):
+                            render_q.put(img)
+                    elif _is_image(file_path):
+                        render_q.put(open_image(file_path))
+                    else:
+                        render_q.put(RuntimeError("Unsupported file type for OCR."))
+                except Exception as exc:
+                    render_q.put(exc)   # propagate to consumer
+                finally:
+                    render_q.put(None)  # sentinel — rendering done
 
-                        completed_count += 1
-                        progress = int((completed_count / total_pages) * 100)
-                        job_store.update_job(job_id, progress=progress)
-                        logger.info(f"OCR page {idx}/{total_pages} done ({completed_count} completed)")
+            render_thread = _threading.Thread(
+                target=_render_producer, daemon=True, name=f"render-{job_id}"
+            )
+            render_thread.start()
+            logger.info(
+                "Streaming OCR started: ~%d page(s), %d worker(s), cache=%s for job %s",
+                total_pages, page_workers, "on" if cache else "off", job_id,
+            )
 
-                        if total_pages > 50 and completed_count % 10 == 0:
-                            gc.collect()
-                            logger.info(f"Memory cleanup after {completed_count} completed pages")
+            # ── Consumer: submit OCR tasks as rendered images arrive ─────────
+            ocr_images: list = []
+            ocr_page_pdfs: list = []
+            page_results: dict = {}   # idx -> (ocr_text_dict, error_msg)
+            completed_count = 0
+            render_error = None
 
-                # Reassemble pages in document order
-                for idx in range(1, total_pages + 1):
-                    if idx not in page_results:
-                        continue
-                    ocr_text, _ = page_results[idx]
-                    page_detail = ocr_text.get("detail", {}) or {}
-                    page_pdf_bytes = page_detail.get("tesseract_pdf")
-                    safe_detail = dict(page_detail)
-                    safe_detail.pop("tesseract_pdf", None)
-                    result["pages"].append({
-                        "page": idx,
-                        "text": ocr_text["text"],
-                        "engine": ocr_text["engine"],
-                        "detail": safe_detail,
-                    })
-                    ocr_page_pdfs.append(page_pdf_bytes)
+            with _PageExecutor(max_workers=page_workers) as page_exec:
+                futures: dict = {}
+                submitted_idx = 1
 
-                result["ocr_text"] = "\n\n".join(page["text"] for page in result["pages"])
-                logger.info(f"OCR completed. Total text length: {len(result['ocr_text'])}")
-                
-                # For 'both' mode, extract text from OCR'd PDF
-                if mode == "both":
-                    result["final_text"] = result["ocr_text"]
-                    logger.info(f"Text extraction enabled (mode=both)")
-                else:
-                    # For 'ocr' mode, no text extraction needed
-                    result["final_text"] = ""
-                    logger.info(f"Text extraction disabled (mode=ocr)")
+                # Drain the render queue, submitting OCR futures as pages arrive
+                while True:
+                    item = render_q.get()
+                    if item is None:          # sentinel — rendering complete
+                        break
+                    if isinstance(item, Exception):
+                        render_error = item   # handle after the loop
+                        # Drain remaining items so the producer can finish
+                        while render_q.get() is not None:
+                            pass
+                        break
+                    ocr_images.append(item)
+                    args = (
+                        submitted_idx, item, ocr_engine, lang,
+                        psm, oem, preprocess, is_scanned, cache, page_opts_hash,
+                    )
+                    futures[page_exec.submit(_ocr_page_task, args)] = submitted_idx
+                    submitted_idx += 1
+
+                if render_error is not None:
+                    err_str = str(render_error)
+                    if "poppler" in err_str.lower() or isinstance(render_error, ImportError):
+                        error_msg = (
+                            "PDF rendering failed: Poppler is not installed. "
+                            "Install poppler-utils (Linux/Windows) or "
+                            "`brew install poppler` (macOS). "
+                            f"({err_str})"
+                        )
+                    else:
+                        error_msg = f"PDF rendering failed: {err_str}"
+                    logger.error(error_msg)
+                    result["errors"].append(error_msg)
+
+                # Now exact page count is known
+                total_pages = len(ocr_images) or total_pages
+
+                for future in _as_completed(futures):
+                    if cancel_event and cancel_event.is_set():
+                        logger.info("Job %s cancelled during parallel OCR", job_id)
+                        for f in futures:
+                            f.cancel()
+                        return
+
+                    try:
+                        idx, ocr_text, error_msg = future.result()
+                    except Exception as exc:
+                        idx = futures[future]
+                        error_msg = f"Page {idx} OCR failed: {exc}"
+                        ocr_text = {"text": "", "engine": ocr_engine, "detail": {"error": str(exc)}}
+
+                    page_results[idx] = (ocr_text, error_msg)
+                    if error_msg:
+                        result["errors"].append(error_msg)
+
+                    completed_count += 1
+                    progress = int((completed_count / total_pages) * 100) if total_pages else 0
+                    job_store.update_job(job_id, progress=progress)
+                    logger.info(
+                        "OCR page %d/%d done (%d completed)", idx, total_pages, completed_count
+                    )
+
+                    if total_pages > 50 and completed_count % 10 == 0:
+                        gc.collect()
+                        logger.info("Memory cleanup after %d completed pages", completed_count)
+
+            render_thread.join(timeout=5)  # ensure producer has exited cleanly
+
+            # Reassemble pages in document order
+            for idx in range(1, total_pages + 1):
+                if idx not in page_results:
+                    continue
+                ocr_text, _ = page_results[idx]
+                page_detail = ocr_text.get("detail", {}) or {}
+                page_pdf_bytes = page_detail.get("tesseract_pdf")
+                safe_detail = dict(page_detail)
+                safe_detail.pop("tesseract_pdf", None)
+                result["pages"].append({
+                    "page": idx,
+                    "text": ocr_text["text"],
+                    "engine": ocr_text["engine"],
+                    "detail": safe_detail,
+                })
+                ocr_page_pdfs.append(page_pdf_bytes)
+
+            result["ocr_text"] = "\n\n".join(page["text"] for page in result["pages"])
+            logger.info("OCR completed. Total text length: %d", len(result["ocr_text"]))
+
+            if mode == "both":
+                result["final_text"] = result["ocr_text"]
+                logger.info("Text extraction enabled (mode=both)")
+            else:
+                result["final_text"] = ""
+                logger.info("Text extraction disabled (mode=ocr)")
             
             # Save results with PDF generation
             json_path, text_path, pdf_path = _persist_result(

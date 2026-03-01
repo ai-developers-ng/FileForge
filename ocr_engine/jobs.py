@@ -98,17 +98,28 @@ class JobStore:
                     pass
                 conn.execute("update jobs set access_token = hex(randomblob(16)) where access_token is null;")
                 conn.execute("pragma user_version = 9;")
+            if version < 10:
+                try:
+                    conn.execute("alter table jobs add column job_type text;")
+                except sqlite3.OperationalError:
+                    pass
+                # Backfill job_type from the options JSON for existing rows
+                conn.execute(
+                    "update jobs set job_type = json_extract(options, '$.job_type') where job_type is null and options is not null;"
+                )
+                conn.execute("pragma user_version = 10;")
 
     def create_job(self, job_id, filename, options, session_id=None):
         now = datetime.now(UTC).replace(tzinfo=None).isoformat()
         access_token = secrets.token_urlsafe(32)
+        job_type = options.get("job_type") if isinstance(options, dict) else None
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
-                insert into jobs (id, filename, status, created_at, updated_at, progress, options, access_token)
-                values (?, ?, ?, ?, ?, ?, ?, ?)
+                insert into jobs (id, filename, status, created_at, updated_at, progress, options, access_token, job_type)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (job_id, filename, "queued", now, now, 0, json.dumps(options), access_token),
+                (job_id, filename, "queued", now, now, 0, json.dumps(options), access_token, job_type),
             )
         return access_token
 
@@ -116,6 +127,17 @@ class JobStore:
         with self._lock, self._connect() as conn:
             row = conn.execute("select count(*) from jobs where status='completed'").fetchone()
         return row[0] if row else 0
+
+    def count_completed_by_type(self) -> dict:
+        """Return a dict with total and per-type counts of completed jobs."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "select coalesce(job_type, 'unknown'), count(*) from jobs "
+                "where status='completed' group by job_type"
+            ).fetchall()
+        counts = {row[0]: row[1] for row in rows}
+        counts["total"] = sum(counts.values())
+        return counts
 
     def update_job(self, job_id, **fields):
         fields["updated_at"] = datetime.now(UTC).replace(tzinfo=None).isoformat()

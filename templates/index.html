@@ -7,7 +7,19 @@
         <p>Transform your files with powerful conversion tools. OCR, images, audio, video, and documents - all in one place.</p>
         {% if total_processed > 0 %}
         <p class="hero-stat">
-            <strong>{{ "{:,}".format(total_processed) }}</strong> documents processed and counting
+            <strong>{{ "{:,}".format(total_processed) }}</strong> files processed and counting
+            {% if job_stats %}
+            <span class="hero-stat-breakdown">
+                {%- set type_labels = {"ocr": "OCR", "image": "Image", "audio": "Audio", "video": "Video", "document": "Document", "pdf": "PDF"} -%}
+                {%- set parts = [] -%}
+                {%- for key, label in type_labels.items() -%}
+                    {%- if job_stats.get(key, 0) > 0 -%}
+                        {%- set _ = parts.append("{:,} {}".format(job_stats[key], label)) -%}
+                    {%- endif -%}
+                {%- endfor -%}
+                ({{ parts | join(" · ") }})
+            </span>
+            {% endif %}
         </p>
         {% endif %}
     </header>

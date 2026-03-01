@@ -120,6 +120,34 @@ def create_app():
     )
     start_cleanup_thread(settings, job_store, key_store)
 
+    def _tesseract_warmup():
+        """Run a no-op Tesseract call on a tiny blank image at startup.
+
+        The first real OCR job would otherwise pay the cold-start cost of
+        loading tessdata LSTM model files from disk into the OS page cache.
+        Running this once in a background thread amortizes that cost so
+        the first user job starts immediately.
+        """
+        try:
+            import subprocess
+            import tempfile
+            from PIL import Image as _PilImage
+            import pytesseract as _tess
+            tesseract_cmd = getattr(_tess.pytesseract, "tesseract_cmd", "tesseract")
+            with tempfile.TemporaryDirectory() as _d:
+                img = _PilImage.new("L", (64, 64), color=255)
+                img_path = os.path.join(_d, "warmup.tiff")
+                img.save(img_path, format="TIFF")
+                subprocess.run(
+                    [tesseract_cmd, img_path, os.path.join(_d, "out"), "txt"],
+                    capture_output=True, check=False, timeout=30,
+                )
+                logging.getLogger(__name__).info("Tesseract warmup complete")
+        except Exception as exc:
+            logging.getLogger(__name__).debug("Tesseract warmup skipped: %s", exc)
+
+    threading.Thread(target=_tesseract_warmup, daemon=True, name="tesseract-warmup").start()
+
     def _get_encryption_key():
         """Extract and validate the encryption key from the request header."""
         key_b64 = request.headers.get("X-Encryption-Key")
@@ -273,7 +301,8 @@ def create_app():
 
     @app.route("/")
     def index():
-        return render_template("index.html", total_processed=job_store.count_completed_jobs())
+        stats = job_store.count_completed_by_type()
+        return render_template("index.html", total_processed=stats.get("total", 0), job_stats=stats)
 
     @app.route("/results/<job_id>")
     def result_page(job_id):
@@ -556,6 +585,12 @@ def create_app():
         _cancel_events.pop(job_id, None)
 
         return jsonify({"status": "cancelled"})
+
+    @app.route("/api/stats", methods=["GET"])
+    def get_stats():
+        """Return file processing statistics broken down by job type."""
+        stats = job_store.count_completed_by_type()
+        return jsonify(stats)
 
     @app.route("/api/history", methods=["DELETE"])
     def clear_history():
